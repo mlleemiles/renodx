@@ -1,153 +1,94 @@
-#ifndef SRC_ENDFIELD_SHARED_H_
-#define SRC_ENDFIELD_SHARED_H_
+#ifndef SRC_BLOODBORNE_SHARED_H_
+#define SRC_BLOODBORNE_SHARED_H_
 
-// #define RENODX_PEAK_WHITE_NITS                 1000.f
-// #define RENODX_DIFFUSE_WHITE_NITS              renodx::color::bt2408::REFERENCE_WHITE
-// #define RENODX_GRAPHICS_WHITE_NITS             renodx::color::bt2408::GRAPHICS_WHITE
-// #define RENODX_COLOR_GRADE_STRENGTH            1.f
-// #define RENODX_TONE_MAP_TYPE                   TONE_MAP_TYPE_RENO_DRT
-// #define RENODX_TONE_MAP_EXPOSURE               1.f
-// #define RENODX_TONE_MAP_HIGHLIGHTS             1.f
-// #define RENODX_TONE_MAP_SHADOWS                1.f
-// #define RENODX_TONE_MAP_CONTRAST               1.f
-// #define RENODX_TONE_MAP_SATURATION             1.f
-// #define RENODX_TONE_MAP_HIGHLIGHT_SATURATION   1.f
-// #define RENODX_TONE_MAP_BLOWOUT                0
-// #define RENODX_TONE_MAP_FLARE                  0
-// #define RENODX_TONE_MAP_HUE_CORRECTION         1.f
-// #define RENODX_TONE_MAP_HUE_SHIFT              0
-// #define RENODX_TONE_MAP_WORKING_COLOR_SPACE    color::convert::COLOR_SPACE_BT709
-// #define RENODX_TONE_MAP_CLAMP_COLOR_SPACE      color::convert::COLOR_SPACE_NONE
-// #define RENODX_TONE_MAP_CLAMP_PEAK             color::convert::COLOR_SPACE_BT709
-// #define RENODX_TONE_MAP_HUE_PROCESSOR          HUE_PROCESSOR_OKLAB
-// #define RENODX_TONE_MAP_PER_CHANNEL            0
-// #define RENODX_GAMMA_CORRECTION                GAMMA_CORRECTION_GAMMA_2_2
-// #define RENODX_INTERMEDIATE_SCALING            (RENODX_DIFFUSE_WHITE_NITS / RENODX_GRAPHICS_WHITE_NITS)
-// #define RENODX_INTERMEDIATE_ENCODING           (RENODX_GAMMA_CORRECTION + 1.f)
-// #define RENODX_INTERMEDIATE_COLOR_SPACE        color::convert::COLOR_SPACE_BT709
-// #define RENODX_SWAP_CHAIN_DECODING             RENODX_INTERMEDIATE_ENCODING
-// #define RENODX_SWAP_CHAIN_DECODING_COLOR_SPACE RENODX_INTERMEDIATE_COLOR_SPACE
-// #define RENODX_SWAP_CHAIN_CUSTOM_COLOR_SPACE   COLOR_SPACE_CUSTOM_BT709D65
-// #define RENODX_SWAP_CHAIN_SCALING_NITS         RENODX_GRAPHICS_WHITE_NITS
-// #define RENODX_SWAP_CHAIN_CLAMP_NITS           RENODX_PEAK_WHITE_NITS
-// #define RENODX_SWAP_CHAIN_CLAMP_COLOR_SPACE    color::convert::COLOR_SPACE_UNKNOWN
-// #define RENODX_SWAP_CHAIN_ENCODING             ENCODING_SCRGB
-// #define RENODX_SWAP_CHAIN_ENCODING_COLOR_SPACE color::convert::COLOR_SPACE_BT709
+/*
+  Shaders use different push constants (depends on pipeline not shaders actually. So if a vertex shader is using
+  push constants but not frag/pixel shader, then that vertex shader push constant has to be accounted for
+  since they share the same pipeline)
+
+  Anyway, here we define different offsets based on shader used
+*/
+#ifdef USE_SETTINGS_PUSHCONSTANTS
+#define PUSH_CONSTANTS_OFFSET 16
+#endif
+
+#ifdef USE_AUX_PUSHCONSTANTS
+#define PUSH_CONSTANTS_OFFSET 128
+#endif
+
+// Fallback
+#ifndef PUSH_CONSTANTS_OFFSET
+#define PUSH_CONSTANTS_OFFSET 0
+#endif
 
 // Must be 32bit aligned
 // Should be 4x32
 struct ShaderInjectData {
-  float peak_white_nits;
-  float diffuse_white_nits;
-  float graphics_white_nits;
-  float color_grade_strength;
-  float tone_map_type;
-  float tone_map_exposure;
-  float tone_map_highlights;
-  float tone_map_shadows;
-  float tone_map_contrast;
-  float tone_map_saturation;
-  float tone_map_highlight_saturation;
-  float tone_map_blowout;
-  float tone_map_dechroma;
-  float tone_map_flare;
-  float tone_map_hue_correction;
-  float tone_map_hue_shift;
-  float tone_map_working_color_space;
-  float tone_map_clamp_color_space;
-  float tone_map_clamp_peak;
-  float tone_map_hue_processor;
-  float tone_map_per_channel;
-  float gamma_correction;
-  float intermediate_scaling;
-  float intermediate_encoding;
-  float intermediate_color_space;
-  float swap_chain_decoding;
-  float swap_chain_gamma_correction;
-  //  float swap_chain_decoding_color_space;
-  float swap_chain_custom_color_space;
-  // float swap_chain_scaling_nits;
-  // float swap_chain_clamp_nits;
-  float swap_chain_clamp_color_space;
-  float swap_chain_encoding;
-  float swap_chain_encoding_color_space;
-  float custom_flip_uv_y;
-  float fx_rcas_sharpening;
-  float fx_rcas_amount;
-  float tone_map_hdr_video;
-  float tone_map_video_nits;
-  float reno_drt_tone_map_method;
-  float status_text_opacity;
-  float ping_text_opacity;
-  float custom_random;
-  float custom_grain_strength;
-  float vignette_strength;
-  float ui_visibility;
-  float sun_intensity;
-  float bloom_strength;
-  float godrays_intensity;
-  float perchannelblowout;
-  float ao_intensity;
+  float ao_radius;
+  float ao_radius_scale;
+  float ao_falloff_range;
+  float ao_distribution_power;
+
+  float ao_thin_occluder;
+  float ao_gamma;
+  float ao_temporal_frame;
+  float ao_mip_bias;
+
+  float ao_direction_count;
+  float ao_step_count;
+  float ao_normal_attenuation;
+  float ao_bitmask;
+
+  float ao_thickness;
+  float ao_denoiser_blur_beta;
+  float pad1;
+  float pad2;
 };
 
 #ifndef __cplusplus
-#if ((__SHADER_TARGET_MAJOR == 5 && __SHADER_TARGET_MINOR >= 1) || __SHADER_TARGET_MAJOR >= 6)
-cbuffer shader_injection : register(b13, space50) {
-#elif (__SHADER_TARGET_MAJOR < 5) || ((__SHADER_TARGET_MAJOR == 5) && (__SHADER_TARGET_MINOR < 1))
-cbuffer shader_injection : register(b13) {
-#endif
-  ShaderInjectData shader_injection : packoffset(c0);
+/*
+  We need to account for the padding of the original struct
+  (Aux size is 120 bytes & Setting is 8 bytes). Vulkan adjustments
+  will add the correct offset when pushing constants,
+  but we still need to define the proper offset
+  to account for the original game/emulator push constants.
+
+  IMPORTANT: AUX SIZE WILL BECOME 128 Bytes because alignment depends on the largest
+  element within the struct. Aux Data has uvec4 which is 16 bytes, so total size will
+  have to be aligned to 16. Settings largest element is 4 bytes so it aligns to 4 bytes,
+  so final size will be 8. This is important for offsets and will mess up cbuffers unless
+  they're manually aligned. You can use define DEBUG_LEVEL_1/DEBUG_LEVEL_2 and renodx will
+  log the injection offset
+  e.g. utils::constants::PushShaderInjections(layout: 0x0165a600000165a6[2], dispatch: true, resource_tag: -1, offset: 4) <- Might look different
+  Offset here is 4(in float4) so it is 16
+
+  PUSH CONSTANTS TOTAL SIZE LIMIT IS 256 BYTES! You can't add cbuffers willy nilly.
+  Log should show a warning if it overflows
+*/
+layout(push_constant) uniform PushData {
+  float ao_radius;
+  float ao_radius_scale;
+  float ao_falloff_range;
+  float ao_distribution_power;
+
+  float ao_thin_occluder;
+  float ao_gamma;
+  float ao_temporal_frame;
+  float ao_mip_bias;
+
+  float ao_direction_count;
+  float ao_step_count;
+  float ao_normal_attenuation;
+  float ao_bitmask;
+
+  float ao_thickness;
+  float ao_denoiser_blur_beta;
+  float pad1;
+  float pad2;
 }
+shader_injection;
 
-#define RENODX_TONE_MAP_TYPE                 shader_injection.tone_map_type
-#define RENODX_PEAK_WHITE_NITS               shader_injection.peak_white_nits
-#define RENODX_DIFFUSE_WHITE_NITS            shader_injection.diffuse_white_nits
-#define RENODX_GRAPHICS_WHITE_NITS           shader_injection.graphics_white_nits
-#define RENODX_GAMMA_CORRECTION              shader_injection.gamma_correction
-#define RENODX_TONE_MAP_PER_CHANNEL          shader_injection.tone_map_per_channel
-#define RENODX_TONE_MAP_WORKING_COLOR_SPACE  shader_injection.tone_map_working_color_space
-#define RENODX_TONE_MAP_HUE_PROCESSOR        shader_injection.tone_map_hue_processor
-#define RENODX_TONE_MAP_HUE_CORRECTION       shader_injection.tone_map_hue_correction
-#define RENODX_TONE_MAP_HUE_SHIFT            shader_injection.tone_map_hue_shift
-#define RENODX_TONE_MAP_CLAMP_COLOR_SPACE    shader_injection.tone_map_clamp_color_space
-#define RENODX_TONE_MAP_CLAMP_PEAK           shader_injection.tone_map_clamp_peak
-#define RENODX_TONE_MAP_EXPOSURE             shader_injection.tone_map_exposure
-#define RENODX_TONE_MAP_HIGHLIGHTS           shader_injection.tone_map_highlights
-#define RENODX_TONE_MAP_SHADOWS              shader_injection.tone_map_shadows
-#define RENODX_TONE_MAP_CONTRAST             shader_injection.tone_map_contrast
-#define RENODX_TONE_MAP_SATURATION           shader_injection.tone_map_saturation
-#define RENODX_TONE_MAP_HIGHLIGHT_SATURATION shader_injection.tone_map_highlight_saturation
-#define RENODX_TONE_MAP_BLOWOUT              shader_injection.tone_map_blowout
-#define RENODX_TONE_MAP_DECHROMA             shader_injection.tone_map_dechroma
-#define RENODX_TONE_MAP_FLARE                shader_injection.tone_map_flare
-#define RENODX_COLOR_GRADE_STRENGTH          shader_injection.color_grade_strength
-#define RENODX_INTERMEDIATE_ENCODING         shader_injection.intermediate_encoding
-#define RENODX_SWAP_CHAIN_DECODING           shader_injection.swap_chain_decoding
-#define RENODX_SWAP_CHAIN_GAMMA_CORRECTION   shader_injection.swap_chain_gamma_correction
-// #define RENODX_SWAP_CHAIN_DECODING_COLOR_SPACE shader_injection.swap_chain_decoding_color_space
-#define RENODX_SWAP_CHAIN_CUSTOM_COLOR_SPACE shader_injection.swap_chain_custom_color_space
-// #define RENODX_SWAP_CHAIN_SCALING_NITS         shader_injection.swap_chain_scaling_nits
-// #define RENODX_SWAP_CHAIN_CLAMP_NITS           shader_injection.swap_chain_clamp_nits
-#define RENODX_SWAP_CHAIN_CLAMP_COLOR_SPACE    shader_injection.swap_chain_clamp_color_space
-#define RENODX_SWAP_CHAIN_ENCODING             shader_injection.swap_chain_encoding
-#define RENODX_SWAP_CHAIN_ENCODING_COLOR_SPACE shader_injection.swap_chain_encoding_color_space
-#define RENODX_TONE_MAP_HDR_VIDEO              shader_injection.tone_map_hdr_video
-#define RENODX_VIDEO_NITS                      shader_injection.tone_map_video_nits
-#define RENODX_RENO_DRT_TONE_MAP_METHOD        shader_injection.reno_drt_tone_map_method
-#define PING_TEXT_OPACITY                      shader_injection.ping_text_opacity
-#define STATUS_TEXT_OPACITY                    shader_injection.status_text_opacity
-#define CUSTOM_RANDOM                          shader_injection.custom_random
-#define CUSTOM_GRAIN_STRENGTH                  shader_injection.custom_grain_strength
-#define VIGNETTE_STRENGTH                      shader_injection.vignette_strength
-#define UI_VISIBILITY                          shader_injection.ui_visibility
-#define SUN_INTENSITY                          shader_injection.sun_intensity
-#define BLOOM_STRENGTH                         shader_injection.bloom_strength
-#define GODRAYS_INTENSITY                      shader_injection.godrays_intensity
-#define PER_CHANNEL_BLOWOUT                    shader_injection.perchannelblowout
-#define AO_INTENSITY                           shader_injection.ao_intensity
-
-#include "../../shaders/renodx.hlsl"
+#define AO_GAMMA              shader_injection.ao_final_gamma
 
 #endif
-
-#endif  // SRC_ENDFIELD_SHARED_H_
+#endif  // SRC_BLOODBORNE_SHARED_H_
