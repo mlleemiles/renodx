@@ -32,29 +32,42 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
 	reshade::api::resource_view srv_depth = { 0 };
 	reshade::api::resource_view srv_normal_worldspace = { 0 };
 	reshade::api::resource_view srv_mv = { 0 };
+  reshade::api::resource_view uav_ao = { 0 };
+  reshade::api::resource_usage uav_original_usages = (reshade::api::resource_usage::undefined);
+  reshade::api::resource uav_ao_texture = { 0 };
+  uint64_t uav_resource_handle = 0;
 	
-    reshade::api::resource_view prev_srv_depth = { 0 };
-    reshade::api::resource_view prev_srv_normal_worldspace = { 0 };
-    reshade::api::resource_view prev_srv_mv = { 0 };
+  reshade::api::resource_view prev_srv_depth = { 0 };
+  reshade::api::resource_view prev_srv_normal_worldspace = { 0 };
+  reshade::api::resource_view prev_srv_mv = { 0 };
 	reshade::api::resource_view prev_uav_ao = { 0 };
-	
+#ifdef TRACE_DESC
 	std::map<std::pair<uint32_t, uint32_t>, reshade::api::resource_view> compute_uav_binds;
 	std::map<std::pair<uint32_t, uint32_t>, reshade::api::buffer_range> constants;
+#endif
 };
 #endif
 
 int16_t screen_width = 0;
 int16_t screen_height = 0;
 
-#ifdef REMOVE_UI
+
 bool isUIPass = false;
 bool isPingInputCandidate = false;
 bool isPingDrawn = false;
 bool isUIDInputCandidate = false;
+#ifdef RESHADE_AO
 bool hasDenoised = false;
+bool hasUpscaled = false;
+bool hasAO = false;
+bool hasDepth = false;
+bool hasNormal = false;
+bool hasMV = false;
+#endif
 float use_ping = 1.0f;
 float use_uid = 1.0f;
 
+#ifdef REMOVE_UI
 bool OnPingDraw(reshade::api::command_list* cmd_list) {
 	  isUIPass = true;
     isPingDrawn = isPingInputCandidate;
@@ -79,21 +92,24 @@ bool OnNormalDepthBlit(reshade::api::command_list* cmd_list) {
     if (rtv0.handle == 0) return true;
 
     auto* device = cmd_list->get_device();
-	
+	/*
     auto* renodx_device_data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(device);
     if (renodx_device_data == nullptr) return true;
     const std::shared_lock lock(renodx_device_data->mutex);
-
+  */
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return true;
+
 	
     reshade::api::resource_view_desc current_rtv_desc = device->get_resource_view_desc(rtv0);
 	
 	if (current_rtv_desc.format == reshade::api::format::r32_float) {
 		custom_device_data->srv_depth = rtv0;
+    hasDepth = true;
 	}
 	else if (current_rtv_desc.format == reshade::api::format::r10g10b10a2_unorm ) {
 		custom_device_data->srv_normal_worldspace = rtv0;
+    hasNormal = true;
 	}
 
     return true;
@@ -108,24 +124,49 @@ bool OnMotionBlit(reshade::api::command_list* cmd_list) {
     if (rtv0.handle == 0) return true;
 
     auto* device = cmd_list->get_device();
-	
+	/*
     auto* renodx_device_data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(device);
     if (renodx_device_data == nullptr) return true;
     const std::shared_lock lock(renodx_device_data->mutex);
 
+    reshade::api::resource_view_desc current_rtv_desc = device->get_resource_view_desc(rtv0);
+  */
+
+
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return true;
-	
-    reshade::api::resource_view_desc current_rtv_desc = device->get_resource_view_desc(rtv0);
 
-	custom_device_data->srv_mv = rtv0;
+	  custom_device_data->srv_mv = rtv0;
+    hasMV = true;
 
     return true;
 }
 
 bool OnDenoiserFinish(reshade::api::command_list* cmd_list) {
     hasDenoised = true;
+    hasAO = true;
     return true;
+}
+
+bool OnUpsampleFinish(reshade::api::command_list* cmd_list) {
+    auto* cmd_list_data = renodx::utils::data::Get<renodx::utils::swapchain::CommandListData>(cmd_list);
+    if (cmd_list_data == nullptr) return true;
+
+    auto* device = cmd_list->get_device();
+
+    auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
+    if (custom_device_data == nullptr) return true;
+    if (custom_device_data->uav_ao.handle == 0) return true;
+
+    auto* data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(cmd_list->get_device());
+    if (data == nullptr) return true;
+    const std::shared_lock lock(data->mutex);
+    cmd_list->barrier(custom_device_data->uav_ao_texture, custom_device_data->uav_original_usages, reshade::api::resource_usage::render_target);
+    for (auto* runtime : data->effect_runtimes) {
+      runtime->render_effects(cmd_list, custom_device_data->uav_ao, custom_device_data->uav_ao);
+    }
+    cmd_list->barrier(custom_device_data->uav_ao_texture, reshade::api::resource_usage::render_target, custom_device_data->uav_original_usages);
+    return false;
 }
 #endif
 
@@ -155,7 +196,14 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 	},
 	{0x3F1D52C5, {
 			 .crc32 = 0x3F1D52C5,
-			 .on_draw = &OnDenoiserFinish,
+       .code = __0x3F1D52C5,
+			 .on_drawn = &OnDenoiserFinish,
+		 },
+	},
+	{0x21E2F7BD, {
+			 .crc32 = 0x21E2F7BD,
+       .code = __0x21E2F7BD,
+			 .on_drawn = &OnUpsampleFinish,
 		 },
 	},
 #endif
@@ -418,6 +466,7 @@ bool OnDrawIndexed(
 
     return false;
 }
+#endif
 
 void OnPresent(
     reshade::api::command_queue* queue,
@@ -431,10 +480,17 @@ void OnPresent(
 	isUIDInputCandidate = false;
 	isPingDrawn = false;
 	isUIPass = false;
+#ifdef RESHADE_AO
+  hasAO = false;
   hasDenoised = false;
+  hasUpscaled = false;
+  hasDepth = false;
+  hasNormal = false;
+  hasMV = false;
+#endif
 	
 }
-#endif
+
 
 #ifdef RESHADE_AO
 void OnInitDevice(reshade::api::device* device) {
@@ -454,49 +510,194 @@ void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::c
 
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return;
-	
-	reshade::api::resource_view uav_view = { 0 };
-	
-	if (!custom_device_data->compute_uav_binds.empty()) {
-		auto pair = custom_device_data->compute_uav_binds.find({0, 0});
-		if (pair != custom_device_data->compute_uav_binds.end()) {
-			uav_view = pair->second;
-		}
-	}
-	
+
+	  //if (!hasAO) return;
+
     for (auto* runtime : renodx_device_data->effect_runtimes) {
         if (runtime == nullptr) continue;
 
-        if (custom_device_data->srv_depth.handle != custom_device_data->prev_srv_depth.handle) {
-            runtime->update_texture_bindings("DEPTH_LINEAR", custom_device_data->srv_depth, custom_device_data->srv_depth);
-            custom_device_data->prev_srv_depth = custom_device_data->srv_depth;
+        if (custom_device_data->srv_depth.handle != 0) {
+          if (custom_device_data->srv_depth.handle != custom_device_data->prev_srv_depth.handle) {
+              runtime->update_texture_bindings("DEPTH", custom_device_data->srv_depth, custom_device_data->srv_depth);
+              custom_device_data->prev_srv_depth = custom_device_data->srv_depth;
+          }
+        }
+        else
+        {
+          reshade::api::resource_view empty_view = {0u};
+          runtime->update_texture_bindings("DEPTH", empty_view, empty_view);
         }
 
-        if (custom_device_data->srv_normal_worldspace.handle != custom_device_data->prev_srv_normal_worldspace.handle) {
-            runtime->update_texture_bindings("NORMAL_WS", custom_device_data->srv_normal_worldspace, custom_device_data->srv_normal_worldspace);
-            custom_device_data->prev_srv_normal_worldspace = custom_device_data->srv_normal_worldspace;
+        if (custom_device_data->srv_normal_worldspace.handle != 0) {
+          if (custom_device_data->srv_normal_worldspace.handle != custom_device_data->prev_srv_normal_worldspace.handle) {
+              runtime->update_texture_bindings("NORMAL_WS", custom_device_data->srv_normal_worldspace, custom_device_data->srv_normal_worldspace);
+              custom_device_data->prev_srv_normal_worldspace = custom_device_data->srv_normal_worldspace;
+          }
+        }
+        else
+        {
+          reshade::api::resource_view empty_view = {0u};
+          runtime->update_texture_bindings("NORMAL_WS", empty_view, empty_view);
         }
 
-        if (custom_device_data->srv_mv.handle != custom_device_data->prev_srv_mv.handle) {
-            runtime->update_texture_bindings("MOTION_VECTOR", custom_device_data->srv_mv, custom_device_data->srv_mv);
-            custom_device_data->prev_srv_mv = custom_device_data->srv_mv;
+        if (custom_device_data->srv_mv.handle != 0) {
+          if (custom_device_data->srv_mv.handle != custom_device_data->prev_srv_mv.handle) {
+              runtime->update_texture_bindings("MOTION_VECTOR", custom_device_data->srv_mv, custom_device_data->srv_mv);
+              custom_device_data->prev_srv_mv = custom_device_data->srv_mv;
+          }
         }
-		
-        if (custom_device_data->srv_mv.handle != custom_device_data->prev_srv_mv.handle) {
-            runtime->update_texture_bindings("MOTION_VECTOR", custom_device_data->srv_mv, custom_device_data->srv_mv);
-            custom_device_data->prev_srv_mv = custom_device_data->srv_mv;
+        else
+        {
+          reshade::api::resource_view empty_view = {0u};
+          runtime->update_texture_bindings("MOTION_VECTOR", empty_view, empty_view);
         }
-		
-		
-        if (uav_view.handle != custom_device_data->prev_uav_ao.handle) {
-            runtime->update_texture_bindings("FINAL_AO", custom_device_data->srv_mv, uav_view);
-            custom_device_data->prev_uav_ao = uav_view;
+
+        if (custom_device_data->uav_ao.handle != 0) {
+          if (custom_device_data->uav_ao.handle != custom_device_data->prev_uav_ao.handle) {
+            runtime->update_texture_bindings("FINAL_AO", custom_device_data->uav_ao, custom_device_data->uav_ao);
+            custom_device_data->prev_uav_ao = custom_device_data->uav_ao;
+          }
+        }
+        else
+        {
+          reshade::api::resource_view empty_view = {0u};
+          runtime->update_texture_bindings("FINAL_AO", empty_view, empty_view);
         }
 		
     }
+    hasAO = false;
+    hasDepth = false;
+    hasNormal = false;
+    hasMV = false;
 }
-#endif
 
+std::vector<reshade::api::resource_view> GetResourceViewsFromResource(const reshade::api::resource& target_resource, const reshade::api::device* device) {
+    std::vector<reshade::api::resource_view> result_views;
+    auto* resource_data = renodx::utils::data::Get<renodx::utils::resource::DeviceData>(device);
+    if (resource_data == nullptr) return result_views;
+    
+    if (target_resource.handle == 0u) {
+        return result_views;
+    }
+    
+    renodx::utils::resource::ResourceInfo* target_resource_info = renodx::utils::resource::GetResourceInfo(target_resource, false);
+    if (target_resource_info == nullptr || target_resource_info->destroyed) {
+        //log::w("utils::resource::GetResourceViewsFromResource(Invalid or destroyed resource: ", log::AsPtr(target_resource.handle), ")");
+        return result_views;
+    }
+    
+    resource_data->store->resource_view_infos.for_each([&](const std::pair<const uint64_t, renodx::utils::resource::ResourceViewInfo>& pair) {
+        const renodx::utils::resource::ResourceViewInfo& view_info = pair.second;
+        
+        if (!view_info.destroyed && 
+            view_info.original_resource.handle == target_resource.handle && 
+            view_info.resource_info == target_resource_info) {
+            result_views.push_back(view_info.view);
+        }
+    });
+    
+    return result_views;
+}
+
+
+void OnBarrier(
+    reshade::api::command_list* cmd_list,
+    uint32_t count,
+    const reshade::api::resource* resources,
+    const reshade::api::resource_usage* old_states,
+    const reshade::api::resource_usage* new_states) {
+
+    auto* device = cmd_list->get_device();
+    auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
+    if (custom_device_data == nullptr)
+    {
+        custom_device_data->uav_ao = { 0 };
+        custom_device_data->uav_original_usages = (reshade::api::resource_usage::undefined);
+        custom_device_data->uav_resource_handle = 0;
+        return;
+    }
+
+    if (hasDenoised) {
+        if (custom_device_data == nullptr) return;
+        if (count > 2) return;
+
+        //auto all_views = GetResourceViewsFromResource(resources[1], device);
+        //if (!all_views.empty()) {
+            //custom_device_data->uav_ao = all_views[0];
+//#define DEBUG_AO_RESOURCE
+
+        uint32_t full_res_index = 0;
+        auto current_uav_desc = device->get_resource_desc(resources[0]);
+        uint32_t index_0_width = static_cast<unsigned int>(current_uav_desc.texture.width);
+        current_uav_desc = device->get_resource_desc(resources[1]);
+        if (index_0_width > static_cast<unsigned int>(current_uav_desc.texture.width)) {
+            full_res_index = 0;
+        }
+        else {
+            full_res_index = 1;
+        }
+
+#ifdef DEBUG_AO_RESOURCE
+        reshade::log::message(
+            reshade::log::level::debug,
+            std::format("Found GTAO UAV at index {} - widht:{} height:{}", full_res_index, static_cast<unsigned int>(current_uav_desc.texture.width), static_cast<unsigned int>(current_uav_desc.texture.height)).c_str());
+#endif 
+        custom_device_data->uav_original_usages = new_states[full_res_index];
+        custom_device_data->uav_ao_texture = resources[full_res_index];
+        if (resources[full_res_index].handle != custom_device_data->uav_resource_handle) {
+            custom_device_data->uav_resource_handle = resources[full_res_index].handle;
+            auto all_views = GetResourceViewsFromResource(resources[full_res_index], device);
+            if (!all_views.empty()) {
+                custom_device_data->uav_ao = all_views[0];
+            }
+        }
+
+        //return all_views[0];
+
+    hasDenoised = false;
+    return;
+  }
+
+    //device->create_resource_view()
+    /*
+    for (uint32_t i = 0; i < count; i++) {
+      
+      std::stringstream s;
+      s << "on_barrier(" << PRINT_PTR(resources[i].handle);
+      s << ", " << std::hex << static_cast<uint32_t>(old_states[i]) << std::dec << " (" << old_states[i] << ")";
+      s << " => " << std::hex << static_cast<uint32_t>(new_states[i]) << std::dec << " (" << new_states[i] << ")";
+      s << ") [" << i << "]";
+      reshade::log::message(reshade::log::level::info, s.str().c_str());
+      
+    }
+    */
+
+  if (!hasAO)
+  {
+      custom_device_data->uav_ao = { 0 };
+      custom_device_data->uav_original_usages = (reshade::api::resource_usage::undefined);
+      custom_device_data->uav_resource_handle = 0;
+  }
+
+  if (!hasDepth)
+  {
+      custom_device_data->srv_depth = { 0 };
+  }
+
+  if (!hasNormal)
+  {
+      custom_device_data->srv_normal_worldspace = { 0 };
+  }
+
+  if (!hasMV)
+  {
+      custom_device_data->srv_mv = { 0 };
+  }
+
+  return;
+
+}
+#ifdef TRACE_DESC
 void OnInitCommandList(reshade::api::command_list* cmd_list) {
   renodx::utils::data::Create<DeviceData>(cmd_list);
 }
@@ -545,8 +746,8 @@ if (hasDenoised) {
       if (layout_data != nullptr) {
         const auto& info = *layout_data;
         auto param_count = info.params.size();
-        //auto* descriptor_data = renodx::utils::data::Get<renodx::utils::descriptor::DeviceData>(device);
-        //if (descriptor_data == nullptr) return false;
+        auto* descriptor_data = renodx::utils::data::Get<renodx::utils::descriptor::DeviceData>(device);
+        if (descriptor_data == nullptr) return false;
 		/*
 		reshade::log::message(
 					  reshade::log::level::debug,
@@ -617,7 +818,7 @@ if (hasDenoised) {
             uint32_t base_offset = 0;
             reshade::api::descriptor_heap heap = {0};
             device->get_descriptor_heap_offset(table, range.binding, 0, &heap, &base_offset);
-            const std::shared_lock descriptor_lock(descriptor_data->mutex);
+            //const std::shared_lock descriptor_lock(descriptor_data->mutex);
 
 		  reshade::log::message(
 					  reshade::log::level::debug,
@@ -740,6 +941,8 @@ void OnBindDescriptorTables(
         }
       }
 }
+#endif
+#endif
 
 bool initialized = false;
 
@@ -806,23 +1009,25 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
       });
 	  
 	  reshade::register_event<reshade::addon_event::init_swapchain>(OnInitSwapchain);
+	  reshade::register_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::register_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
-	  reshade::register_event<reshade::addon_event::present>(OnPresent);
 #endif
 	  
 #ifdef RESHADE_AO
       reshade::register_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::register_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
 	  reshade::register_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
-#endif
+    reshade::register_event<reshade::addon_event::barrier>(OnBarrier);
 
+#ifdef TRACE_DESC
 	    reshade::register_event<reshade::addon_event::dispatch>(OnDispatchTest);
       reshade::register_event<reshade::addon_event::init_command_list>(OnInitCommandList);
       reshade::register_event<reshade::addon_event::reset_command_list>(OnResetCommandList);
       reshade::register_event<reshade::addon_event::destroy_command_list>(OnDestroyCommandList);
       reshade::register_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
-
+#endif
+#endif
       if (!initialized) {
         // renodx::utils::random::binds.push_back(&shader_injection.swap_chain_output_dither_seed);
         initialized = true;
@@ -831,33 +1036,37 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
       break;
     case DLL_PROCESS_DETACH:
 	  reshade::unregister_event<reshade::addon_event::init_swapchain>(OnInitSwapchain);
+	  reshade::unregister_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::unregister_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
-	  reshade::unregister_event<reshade::addon_event::present>(OnPresent);
 #endif
 
 #ifdef RESHADE_AO
       reshade::unregister_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::unregister_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
 	  reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
-#endif
+    reshade::unregister_event<reshade::addon_event::barrier>(OnBarrier);
 
+#ifdef TRACE_DESC
       reshade::unregister_event<reshade::addon_event::dispatch>(OnDispatchTest);
       reshade::unregister_event<reshade::addon_event::init_command_list>(OnInitCommandList);
       reshade::unregister_event<reshade::addon_event::reset_command_list>(OnResetCommandList);
       reshade::unregister_event<reshade::addon_event::destroy_command_list>(OnDestroyCommandList);
       reshade::unregister_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
-      
+#endif
+#endif      
 	
       reshade::unregister_addon(h_module);
       break;
   }
 
   renodx::utils::settings::Use(fdw_reason, &settings);
+#ifdef RESHADE_AO
   renodx::utils::pipeline_layout::Use(fdw_reason);
   renodx::utils::swapchain::Use(fdw_reason);
   renodx::utils::shader::Use(fdw_reason);
   renodx::utils::descriptor::Use(fdw_reason);
+#endif
   renodx::mods::swapchain::Use(fdw_reason);
   renodx::mods::shader::Use(fdw_reason, custom_shaders, &shader_injection);
 
