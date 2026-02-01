@@ -2,123 +2,6 @@
 #include "../includes/lutbuilder_cbuffer.hlsl"
 #include "../shared.h"
 
-// from Pumbo
-// 0 None
-// 1 Reduce saturation and increase brightness until luminance is >= 0
-// 2 Clip negative colors (makes luminance >= 0)
-// 3 Snap to black
-void FixColorGradingLUTNegativeLuminance(inout float3 col, uint type = 1) {
-  if (type <= 0) {
-    return;
-  }
-
-  float luminance = renodx::color::y::from::AP1(col.xyz);
-  if (luminance < -renodx::math::FLT_MIN)  // -asfloat(0x00800000): -1.175494351e-38f
-  {
-    if (type == 1) {
-      // Make the color more "SDR" (less saturated, and thus less beyond Rec.709) until the luminance is not negative anymore (negative luminance means the color was beyond Rec.709 to begin with, unless all components were negative).
-      // This is preferrable to simply clipping all negative colors or snapping to black, because it keeps some HDR colors, even if overall it's still "black", luminance wise.
-      // This should work even in case "positiveLuminance" was <= 0, as it will simply make the color black.
-      float3 positiveColor = max(col.xyz, 0.0);
-      float3 negativeColor = min(col.xyz, 0.0);
-      float positiveLuminance = renodx::color::y::from::AP1(positiveColor);
-      float negativeLuminance = renodx::color::y::from::AP1(negativeColor);
-#pragma warning(disable: 4008)
-      float negativePositiveLuminanceRatio = positiveLuminance / -negativeLuminance;
-#pragma warning(default: 4008)
-      negativeColor.xyz *= negativePositiveLuminanceRatio;
-      col.xyz = positiveColor + negativeColor;
-    } else if (type == 2) {
-      // This can break gradients as it snaps colors to brighter ones (it depends on how the displays clips HDR10 or scRGB invalid colors)
-      col.xyz = max(col.xyz, 0.0);
-    } else  // if (type >= 3)
-    {
-      col.xyz = 0.0;
-    }
-  }
-}
-
-float3 ChrominanceOKLab(
-    float3 incorrect_color,
-    float3 reference_color,
-    float strength = 1.f,
-    float blowout_restoration = 0.f) {
-  if (strength == 0.f) return incorrect_color;
-
-  float3 incorrect_lab = renodx::color::oklab::from::BT709(incorrect_color);
-  float3 reference_lab = renodx::color::oklab::from::BT709(reference_color);
-
-  float2 incorrect_ab = incorrect_lab.yz;
-  float2 reference_ab = reference_lab.yz;
-
-  // Compute chrominance (magnitude of the a–b vector)
-  float incorrect_chrominance = length(incorrect_ab);
-  float correct_chrominance = length(reference_ab);
-
-  // Scale original chrominance vector toward target chrominance
-  float chrominance_ratio = renodx::math::DivideSafe(correct_chrominance, incorrect_chrominance, 1.f);
-  float scale = lerp(1.f, chrominance_ratio, strength);
-
-  float t = 1.0f - step(1.0f, scale);  // t = 1 when scale < 1, 0 when scale >= 1
-  scale = lerp(scale, 1.0f, t * blowout_restoration);
-
-  incorrect_lab.yz = incorrect_ab * scale;
-
-  float3 result = renodx::color::bt709::from::OkLab(incorrect_lab);
-  return result;
-}
-
-float3 ChrominanceICtCp(
-    float3 incorrect_color,
-    float3 reference_color,
-    float strength = 1.f,
-    float blowout_restoration = 0.f) {
-  if (strength == 0.f) return incorrect_color;
-
-  float3 incorrect_lab = renodx::color::ictcp::from::BT709(incorrect_color);
-  float3 reference_lab = renodx::color::ictcp::from::BT709(reference_color);
-
-  float2 incorrect_ab = incorrect_lab.yz;
-  float2 reference_ab = reference_lab.yz;
-
-  // Compute chrominance (magnitude of the Ct-Cp vector)
-  float incorrect_chrominance = length(incorrect_ab);
-  float correct_chrominance = length(reference_ab);
-
-  // Scale original chrominance vector toward target chrominance
-  float chrominance_ratio = renodx::math::DivideSafe(correct_chrominance, incorrect_chrominance, 1.f);
-  float scale = lerp(1.f, chrominance_ratio, strength);
-
-  float t = 1.0f - step(1.0f, scale);  // t = 1 when scale < 1, 0 when scale >= 1
-  scale = lerp(scale, 1.0f, t * blowout_restoration);
-
-  incorrect_lab.yz = incorrect_ab * scale;
-
-  float3 result = renodx::color::bt709::from::ICtCp(incorrect_lab);
-  return result;
-}
-
-float3 ChrominanceAndHueOKLab(float3 incorrect_color, float3 correct_color, float strength = 1.f) {
-  if (strength == 0.f) return incorrect_color;
-
-  float3 incorrect_lab = renodx::color::oklab::from::BT709(incorrect_color);
-  float3 correct_lab = renodx::color::oklab::from::BT709(correct_color);
-
-  incorrect_lab.yz = correct_lab.yz;
-
-  float3 result = renodx::color::bt709::from::OkLab(incorrect_lab);
-  return result;
-}
-
-float3 HueCorrectAP1(float3 incorrect_color_ap1, float3 correct_color_ap1, float hue_correct_strength = 0.5f) {
-  float3 incorrect_color_bt709 = renodx::color::bt709::from::AP1(incorrect_color_ap1);
-  float3 correct_color_bt709 = renodx::color::bt709::from::AP1(correct_color_ap1);
-
-  float3 corrected_color_bt709 = renodx::color::correct::Hue(incorrect_color_bt709, correct_color_bt709, hue_correct_strength, 0u);
-  float3 corrected_color_ap1 = renodx::color::ap1::from::BT709(corrected_color_bt709);
-  return corrected_color_ap1;
-}
-
 /// Piecewise custom ARRI-style log/linear encoding
 #define CUSTOM_ARRILOG_ENCODE_GENERATOR(T)       \
   T CustomArriLogEncode(T x) {                   \
@@ -345,11 +228,25 @@ float3 ApplyLUT(float3 pre_lut_color, Texture2D<float4> t0, Texture2D<float4> t1
   return lut_output_final;
 }
 
+float3 Unclamp(float3 original_gamma, float3 black_gamma, float3 mid_gray_gamma, float3 neutral_gamma) {
+  const float3 added_gamma = black_gamma;
+
+  const float mid_gray_average = renodx::math::Average(mid_gray_gamma);
+
+  // Remove from 0 to mid-gray
+  const float shadow_length = mid_gray_average;
+  const float shadow_stop = renodx::math::Max(neutral_gamma);
+  const float3 floor_remove = added_gamma * max(0, shadow_length - shadow_stop) / shadow_length;
+
+  const float3 unclamped_gamma = max(0, original_gamma - floor_remove);
+  return unclamped_gamma;
+}
+
 float3 RecolorUnclampedAP1(float3 original_linear, float3 unclamped_linear, float strength = 1.f) {
   const float3 original_perceptual = renodx::color::oklab::from::BT709(renodx::color::bt709::from::AP1(original_linear));
 
   // Hue correction
-  float3 retinted_perceptual = renodx::color::oklab::from::BT709(unclamped_linear);
+  float3 retinted_perceptual = renodx::color::oklab::from::BT709(renodx::color::bt709::from::AP1(unclamped_linear));
   retinted_perceptual[0] = max(0, retinted_perceptual[0]);
   retinted_perceptual[1] = original_perceptual[1];
   retinted_perceptual[2] = original_perceptual[2];
@@ -358,63 +255,11 @@ float3 RecolorUnclampedAP1(float3 original_linear, float3 unclamped_linear, floa
   retinted_perceptual = lerp(original_perceptual, retinted_perceptual, strength);
 
   float3 retinted_linear = renodx::color::bt709::from::OkLab(retinted_perceptual);
-  retinted_linear = renodx::color::ap1::from::BT709(retinted_linear);
+  retinted_linear = max(0, renodx::color::ap1::from::BT709(retinted_linear));
   return retinted_linear;
 }
 
-float3 UnclampARRILog(
-    float3 original_arri,  // LUT output in ARRI log space
-    float3 black_arri,     // ARRI-encoded value of (0,0,0)
-    float3 mid_gray_arri,  // ARRI-encoded value of (0.18,0.18,0.18)
-    float3 neutral_arri    // ARRI-encoded input color
-) {
-  const float ARRI_BLACK = CustomArriLogEncode(0.f);  // 0.09280935594213702f
-  const float3 added = black_arri;
-
-  const float mid_gray_average = renodx::math::Average(mid_gray_arri);
-
-  // Remove offset from black up to midgray
-  const float shadow_length = mid_gray_average;
-  const float shadow_stop = max(neutral_arri.r, max(neutral_arri.g, neutral_arri.b));
-  const float3 floor_remove = added * max(0, shadow_length - shadow_stop) / shadow_length;
-
-  const float3 unclamped_arri = max(ARRI_BLACK, original_arri - floor_remove);
-  return unclamped_arri;
-}
-
-float3 CorrectBlackARRI(float3 lut_output_color_ap1, float3 lut_input_color_ap1, Texture2D<float4> t0, Texture2D<float4> t1, SamplerState s0) {
-  float3 black_arri = ApplyLUT(float3(0, 0, 0), t0, t1, s0, true);
-
-  // float black_level = CustomArriLogEncode(AP1_to_ARRI_Bradford(black_arri);
-
-  float3 original_arri = CustomArriLogEncode(AP1_to_ARRI_Bradford(lut_output_color_ap1));
-  float3 mid_gray_arri = ApplyLUT(float3(0.18, 0.18, 0.18), t0, t1, s0, true);
-  float3 neutral_arri = CustomArriLogEncode(AP1_to_ARRI_Bradford(lut_input_color_ap1));
-
-  float3 arri_unclamped = UnclampARRILog(
-      original_arri,
-      black_arri,
-      mid_gray_arri,
-      neutral_arri);
-
-  float3 ap1_unclamped = ARRI_Bradford_to_AP1_optimized_red(CustomArriLogDecode(arri_unclamped));
-
-  ap1_unclamped = RecolorUnclampedAP1(lut_output_color_ap1, ap1_unclamped);
-
-  return ap1_unclamped;
-}
-
-// float3 LUTCorrectBlack(float3 lut_output_color_ap1, float3 lut_input_color_ap1, Texture2D<float4> t0, Texture2D<float4> t1, SamplerState s0) {
-//   if (CUSTOM_LUT_SCALING) {
-//     float3 corrected_black = CorrectBlackARRI(lut_output_color_ap1, lut_input_color_ap1, t0, t1, s0);
-
-//     lut_output_color_ap1 = lerp(lut_output_color_ap1, corrected_black, CUSTOM_LUT_SCALING);
-//   }
-
-//   return lut_output_color_ap1;
-// }
-
-float3 CorrectBlack(float3 color_input, float3 lut_color, float lut_black_y, float strength) {
+float3 CorrectBlackAP1(float3 color_input, float3 lut_color, float lut_black_y, float strength) {
   const float input_y = renodx::color::y::from::AP1(max(0, color_input));
   const float color_y = renodx::color::y::from::AP1(max(0, lut_color));
   const float a = lut_black_y;
@@ -427,45 +272,23 @@ float3 CorrectBlack(float3 color_input, float3 lut_color, float lut_black_y, flo
   return new_lut_color;
 }
 
-float3 CorrectBlackPerChannel(float3 color_input, float3 lut_color, float3 lut_black, float strength) {
-  // For each channel: r, g, b
-  float3 input_c = (color_input);
-  float3 color_c = (lut_color);
-  float3 a = lut_black;  // Black level per channel
-  float3 b = lerp(float3(0, 0, 0), lut_black, strength);
-  float3 g = input_c;
-  float3 h = color_c;
-
-  // New value per channel
-  float3 new_c = h - pow(lut_black, pow(1.0 + g, b / a));
-  // Protect against divide by zero
-  float3 out_color = lut_color * select((color_c > 0), min(color_c, new_c) / color_c, 1.0);
-
-  return out_color;
-}
-
-float3 CorrectBlackChrominance(float3 lut_input_color_ap1, float3 lut_output_color_ap1, float3 min_black, float lut_min_y, float strength) {
-  float3 corrected_black_ch = CorrectBlackPerChannel(lut_input_color_ap1, lut_output_color_ap1, min_black, strength);
-  float3 corrected_black_lum = CorrectBlack(lut_input_color_ap1, lut_output_color_ap1, lut_min_y, strength);
-  float3 corrected_black = renodx::color::ap1::from::BT709(ChrominanceICtCp(renodx::color::bt709::from::AP1(corrected_black_lum), renodx::color::bt709::from::AP1(corrected_black_ch), 1.f, 1.f));
-
-  return corrected_black;
-}
-
 float3 LUTCorrectBlack(float3 lut_output_color_ap1, float3 lut_input_color_ap1, Texture2D<float4> t0, Texture2D<float4> t1, SamplerState s0) {
   if (CUSTOM_LUT_SCALING) {
-    float3 min_black = max(0, ApplyLUT(float3(0, 0, 0), t0, t1, s0));
-    float lut_min_y = (renodx::color::y::from::AP1(min_black));
-    if (lut_min_y > 0) {
-      lut_input_color_ap1 *= max(0, ApplyLUT(float3(0.18, 0.18, 0.18), t0, t1, s0)) / 0.18f;  // align midgray of pre and post lut colors
+    float3 lut_black = max(0, ApplyLUT(float3(0, 0, 0), t0, t1, s0));
+    float lut_black_y = renodx::color::y::from::AP1(lut_black);
+    if (lut_black_y > 0.f) {
+      lut_black = renodx::color::grade::Contrast(lut_black, 1.69f);  // emulate ACES contrast
 
-      // Strength at 80 is actually weaker, brings down shadows in such a way that it targets only the darkest shadows
-      // This is needed as ACES and gamma correction afterwards bring down shadows even more
-      // It's abusing the function but that will have to do for now
-      // float3 corrected_black = CorrectBlackChrominance(lut_input_color_ap1, lut_output_color_ap1, min_black, lut_min_y, 80.f);
-      float3 corrected_black = (CorrectBlack(lut_input_color_ap1, lut_output_color_ap1, lut_min_y, 80.f));
+      float3 lut_output_encoded = renodx::color::gamma::Encode(max(0, lut_output_color_ap1));
+      float3 lut_black_encoded = renodx::color::gamma::Encode(lut_black);
+      float3 lut_mid_encoded = lut_black_encoded;
+      float3 lut_input_encoded = renodx::color::gamma::Encode(max(0, lut_input_color_ap1));
 
-      lut_output_color_ap1 = lerp(lut_output_color_ap1, corrected_black, CUSTOM_LUT_SCALING);
+      float3 unclamped_gamma_ap1 = Unclamp(lut_output_encoded, lut_black_encoded, lut_mid_encoded, lut_input_encoded);
+
+      float3 unclamped_linear_ap1 = renodx::color::gamma::Decode(unclamped_gamma_ap1);
+
+      lut_output_color_ap1 = RecolorUnclampedAP1(lut_output_color_ap1, unclamped_linear_ap1, CUSTOM_LUT_SCALING);
     }
   }
 

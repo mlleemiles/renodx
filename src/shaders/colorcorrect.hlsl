@@ -25,13 +25,13 @@ float4 Gamma(float4 color, bool pow_to_srgb = false, float gamma = 2.2f) {
   return float4(Gamma(color.rgb, pow_to_srgb, gamma), color.a);
 }
 
-#define GAMMA_SAFE(T)                                                                   \
-  T GammaSafe(T c, bool pow_to_srgb = false, float gamma = 2.2f) {                      \
-    if (pow_to_srgb) {                                                                  \
-      return renodx::math::Sign(c) * srgb::Decode(color::gamma::Encode(abs(c), gamma)); \
-    } else {                                                                            \
-      return renodx::math::Sign(c) * color::gamma::Decode(srgb::Encode(abs(c)), gamma); \
-    }                                                                                   \
+#define GAMMA_SAFE(T)                                                                      \
+  T GammaSafe(T c, bool pow_to_srgb = false, float gamma = 2.2f) {                         \
+    if (pow_to_srgb) {                                                                     \
+      return renodx::math::CopySign(srgb::Decode(color::gamma::Encode(abs(c), gamma)), c); \
+    } else {                                                                               \
+      return renodx::math::CopySign(color::gamma::Decode(srgb::Encode(abs(c)), gamma), c); \
+    }                                                                                      \
   }
 
 GAMMA_SAFE(float)
@@ -154,9 +154,9 @@ float3 ChrominancedtUCS(
   return result;
 }
 
-float3 Chrominance(float3 incorrect_color, float3 correct_color, float strength = 1.f, float clamp_chrominance_loss = 0.f, uint method = 0u) {
-  if (method == 1u) return ChrominanceICtCp(incorrect_color, correct_color, strength, clamp_chrominance_loss);
-  if (method == 2u) return ChrominancedtUCS(incorrect_color, correct_color, strength, clamp_chrominance_loss);
+float3 Chrominance(float3 incorrect_color, float3 correct_color, float strength = 1.f, float clamp_chrominance_loss = 0.f, int method = 0) {
+  if (method == 1) return ChrominanceICtCp(incorrect_color, correct_color, strength, clamp_chrominance_loss);
+  if (method == 2) return ChrominancedtUCS(incorrect_color, correct_color, strength, clamp_chrominance_loss);
   return ChrominanceOKLab(incorrect_color, correct_color, strength, clamp_chrominance_loss);
 }
 
@@ -274,6 +274,46 @@ float3 Luminance(float3 incorrect_color, float3 correct_color, float strength = 
       renodx::color::y::from::BT709(incorrect_color),
       renodx::color::y::from::BT709(correct_color),
       strength);
+}
+
+float3 GamutDecompress(float3 color, float grayscale, float saturation_scale) {
+  return lerp(grayscale, color, 1.f / saturation_scale);
+}
+
+float3 GamutDecompress(float3 color, float saturation_scale) {
+  float grayscale = renodx::color::y::from::BT709(color);
+  return GamutDecompress(color, grayscale, saturation_scale);
+}
+
+float3 GamutCompress(float3 color, float grayscale, float saturation_scale) {
+  return lerp(grayscale, color, saturation_scale);
+}
+
+float ComputeGamutCompressionScale(float3 color, float grayscale) {
+  // Desaturate (move towards grayscale) until no channel is below 0
+  float lowest_negative_channel = min(0.f, min(color.r, min(color.g, color.b)));
+
+  float distance = grayscale - lowest_negative_channel;
+
+  float ratio = renodx::math::DivideSafe(-lowest_negative_channel, distance, 0.f);
+
+  // if grayscale is 0, ratio is 0 via DivideSafe, so no change
+  // if minchannel is 0, ratio is 0, so no change
+  float saturation_scale = 1.f - ratio;
+  return saturation_scale;
+}
+
+float ComputeGamutCompressionScale(float3 color) {
+  float grayscale = renodx::color::y::from::BT709(color);
+  return ComputeGamutCompressionScale(color, grayscale);
+}
+
+float3 GamutCompress(float3 color, float grayscale) {
+  return lerp(grayscale, color, ComputeGamutCompressionScale(color, grayscale));
+}
+
+float3 GamutCompress(float3 color) {
+  return GamutCompress(color, renodx::color::y::from::BT709(color));
 }
 
 }  // namespace correct

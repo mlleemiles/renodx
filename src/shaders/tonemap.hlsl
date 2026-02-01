@@ -1,13 +1,17 @@
 #ifndef SRC_SHADERS_TONEMAP_HLSL_
 #define SRC_SHADERS_TONEMAP_HLSL_
 
-#include "./aces.hlsl"
 #include "./colorcorrect.hlsl"
 #include "./colorgrade.hlsl"
 #include "./lut.hlsl"
-#include "./reinhard.hlsl"
-#include "./reno_drt.hlsl"
+#include "./tonemap/aces.hlsl"
 #include "./tonemap/daniele.hlsl"
+#include "./tonemap/dice.hlsl"
+#include "./tonemap/frostbite.hlsl"
+#include "./tonemap/hermite_spline.hlsl"
+#include "./tonemap/reinhard.hlsl"
+#include "./tonemap/reno_drt.hlsl"
+#include "./tonemap/neutwo.hlsl"
 
 namespace renodx {
 namespace tonemap {
@@ -42,9 +46,25 @@ float SmoothClamp(float x) {
     return input + new_overage;                                                         \
   }
 
+/// Piecewise linear + exponential compression to a target value starting from a specified number.
+/// https://www.ea.com/frostbite/news/high-dynamic-range-color-grading-and-display-in-frostbite
+#define EXPONENTIALROLLOFF_CLIP_GENERATOR(T)                                         \
+  T ExponentialRollOff(T input, float rolloff_start, float output_max, float clip) { \
+    T rolloff_size = output_max - rolloff_start;                                     \
+    T overage = -max((T)0, input - rolloff_start);                                   \
+    T clip_size = rolloff_start - clip;                                              \
+    T rolloff_value = (T)1.0f - exp(overage / rolloff_size);                         \
+    T clip_value = (T)1.0f - exp(clip_size / rolloff_size);                          \
+    T new_overage = mad(rolloff_size, rolloff_value / clip_value, overage);          \
+    return input + new_overage;                                                      \
+  }
+
 EXPONENTIALROLLOFF_GENERATOR(float)
 EXPONENTIALROLLOFF_GENERATOR(float3)
+EXPONENTIALROLLOFF_CLIP_GENERATOR(float)
+EXPONENTIALROLLOFF_CLIP_GENERATOR(float3)
 #undef EXPONENTIALROLLOFF_GENERATOR
+#undef EXPONENTIALROLLOFF_CLIP_GENERATOR
 
 // Narkowicz
 float3 ACESFittedBT709(float3 color) {
@@ -147,6 +167,98 @@ float3 BT709(float3 x, float linear_white = W) {
   return ApplyCurve(x, A, B, C, D, E, F)
          / ApplyCurve(linear_white, A, B, C, D, E, F);
 }
+
+namespace extended {
+float3 BT709(float3 x, float linear_white = W) {
+  float3 numerator = mad(x, mad(A, x, C * B), D * E);  // x * (a * x + c * b) + d * e
+  float3 denominator = mad(x, mad(A, x, B), D * F);    // x * (a * x + b) + d * f
+
+  float numerator_white = mad(linear_white, mad(A, linear_white, C * B), D * E);
+  float denominator_white = mad(linear_white, mad(A, linear_white, B), D * F);
+
+  float e_over_f = E / F;
+
+  float3 curve_x = (numerator / denominator) - e_over_f;
+  float curve_white = (numerator_white / denominator_white) - e_over_f;
+  float curve_white_inverse = 1.f / curve_white;
+
+  float3 value = curve_x * curve_white_inverse;
+
+  // Use Cardono's Method to solve for point of peak velocity (2nd derivative = 0)
+  // 2B^{2}D(E-CF)+2AD(E-F)(-DF+3Ax^{2})+2ABx(3D(E-CF)+A(-1+C)x^{2}) = 0
+  float a_0 = 2 * B * B * D * (E - C * F) - 2 * A * D * D * F * (E - F);
+  float a_1 = 6 * A * B * D * (E - C * F);
+  float a_2 = 6 * A * A * D * (E - F);
+  float a_3 = 2 * A * A * B * (C - 1);
+
+  float a_3_rcp = 1.f / a_3;  // Helper
+
+  // float p = (3 * a_1 * a_3 - a_2 * a_2) / (3 * a_3 * a_3);
+  float p = (3 * a_1 * a_3 - a_2 * a_2) * (1.f / 3.f) * (a_3_rcp * a_3_rcp);
+
+  // float q = (27 * a_0 * a_3 * a_3 - 9 * a_1 * a_2 * a_3 + 2 * a_2 * a_2 * a_2) / (27 * a_3 * a_3 * a_3);
+  float q = (27 * a_0 * a_3 * a_3 - 9 * a_1 * a_2 * a_3 + 2 * a_2 * a_2 * a_2) * (1.f / 27.f) * (a_3_rcp * a_3_rcp * a_3_rcp);
+
+  // float delta = pow((q / 2), 2) + pow((p / 3), 3);
+  float delta = (q * q) / 4.f + (p * p * p) / 27.f;
+
+  float z;
+  [branch]
+  if (delta >= 0.0f) {
+    // float z = pow(sqrt(delta) - q / 2.f, 1.f / 3.f) - pow(sqrt(delta) + q / 2.f, 1.f / 3.f);
+    // Δ ≥ 0 → one real root, cube‑root form
+    float sqrt_delta = sqrt(delta);
+    z = pow(-q / 2.f + sqrt_delta, 1.f / 3.f) + pow(-q / 2.f - sqrt_delta, 1.f / 3.f);
+  } else {
+    // Δ < 0 → three real roots, use cosine form
+    // usually ta k e k=0 root
+    // float theta = acos((-q / 2.0f) / sqrt(-pow(p / 3.0f, 3)));
+    // float r = 2.0f * sqrt(-p / 3.0f);
+
+    // p is always negative here
+    float positive_p_over_3 = -p / 3.f;
+
+    float theta = acos((-q / 2.0f) * rsqrt(positive_p_over_3 * positive_p_over_3 * positive_p_over_3));
+    float r = 2.0f * sqrt(positive_p_over_3);
+
+    z = r * cos(theta / 3.0f);
+  }
+
+  // float peak_velocity = z - a_2 / (3 * a_3);
+  float peak_velocity_point = (z - a_2) * (1.f / 3.f) * a_3_rcp;
+
+  // If no toe, use initial velocity
+  peak_velocity_point = max(0, peak_velocity_point);
+
+  float peak_velocity_value_numerator = mad(peak_velocity_point, mad(A, peak_velocity_point, C * B), D * E);
+  float peak_velocity_value_denominator = mad(peak_velocity_point, mad(A, peak_velocity_point, B), D * F);
+  float peak_velocity_value_denominator_rcp = 1.f / peak_velocity_value_denominator;
+
+  float peak_velocity_value_base = peak_velocity_value_numerator * peak_velocity_value_denominator_rcp;
+
+  // Evaluate first derivative to get velocity (skip [E/F, W] normalization)
+  // R\left(x\right)=\frac{(2Ax+CB)D_{r}\left(x\right)-(2Ax+B)N_{r}\left(x\right)}{D_{r}\left(x\right)^{2}}
+  // R\left(x\right)=\frac{(2Ax+CB)-(2Ax+B)F\left(x\right)}{D_{r}\left(x\right)}
+  float peak_velocity_unscaled = ((2 * A * peak_velocity_point + C * B)
+                                  - ((2 * A * peak_velocity_point + B) * peak_velocity_value_base))
+                                 * peak_velocity_value_denominator_rcp;
+
+  float peak_velocity = peak_velocity_unscaled * curve_white_inverse;
+
+  float curve_peak = peak_velocity_value_base - e_over_f;
+  float value_peak = curve_peak * curve_white_inverse;
+
+  // Use point slope form (y = y1 + m(x - x1)) to extend curve linearly beyond peak velocity
+
+  float m = peak_velocity;
+  float3 x_0 = value;
+  float x1 = peak_velocity_point;
+  float y1 = value_peak;
+  float3 extended_value = y1 + m * (x_0 - x1);
+
+  return renodx::math::Select(value > peak_velocity_point, extended_value, value);
+}
+}
 }  // namespace uncharted2
 
 namespace unity {
@@ -193,9 +305,9 @@ struct Config {
   float hue_correction_type;
   float hue_correction_strength;
   float3 hue_correction_color;
-  int reno_drt_hue_correction_method;
-  int reno_drt_tone_map_method;
-  int reno_drt_working_color_space;
+  float reno_drt_hue_correction_method;
+  float reno_drt_tone_map_method;
+  float reno_drt_working_color_space;
   bool reno_drt_per_channel;
   float reno_drt_blowout;
   float reno_drt_clamp_color_space;
@@ -211,9 +323,9 @@ float3 UpgradeToneMap(
     float auto_correction = 0.f) {
   float ratio = 1.f;
 
-  float y_untonemapped = renodx::color::y::from::BT709(abs(color_untonemapped));
-  float y_tonemapped = renodx::color::y::from::BT709(abs(color_tonemapped));
-  float y_tonemapped_graded = renodx::color::y::from::BT709(abs(color_tonemapped_graded));
+  float y_untonemapped = renodx::color::y::from::BT709(color_untonemapped);
+  float y_tonemapped = renodx::color::y::from::BT709(color_tonemapped);
+  float y_tonemapped_graded = renodx::color::y::from::BT709(color_tonemapped_graded);
 
   if (y_untonemapped < y_tonemapped) {
     // If substracting (user contrast or paperwhite) scale down instead
@@ -254,7 +366,7 @@ Config Create(
     float type = config::type::VANILLA,
     float peak_nits = 203.f,
     float game_nits = 203.f,
-    float gamma_correction = 0,
+    float gamma_correction = 0.f,
     float exposure = 1.f,
     float highlights = 1.f,
     float shadows = 1.f,
@@ -270,12 +382,12 @@ Config Create(
     float reno_drt_flare = 0.f,
     float hue_correction_type = config::hue_correction_type::INPUT,
     float hue_correction_strength = 1.f,
-    float3 hue_correction_color = 0,
-    uint reno_drt_hue_correction_method = renodrt::config::hue_correction_method::OKLAB,
-    uint reno_drt_tone_map_method = renodrt::config::tone_map_method::DANIELE,
-    uint reno_drt_working_color_space = 0u,
+    float3 hue_correction_color = 0.f,
+    float reno_drt_hue_correction_method = renodrt::config::hue_correction_method::OKLAB,
+    float reno_drt_tone_map_method = renodrt::config::tone_map_method::DANIELE,
+    float reno_drt_working_color_space = 0.f,
     bool reno_drt_per_channel = false,
-    float reno_drt_blowout = 0,
+    float reno_drt_blowout = 0.f,
     float reno_drt_clamp_color_space = 2.f,
     float reno_drt_clamp_peak = 1.f,
     float reno_drt_white_clip = 100.f) {

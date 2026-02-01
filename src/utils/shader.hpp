@@ -921,6 +921,7 @@ static void OnInitPipeline(
     assert(pair->second.pipeline.handle == pipeline.handle);
     was_destroyed = pair->second.destroyed;
     if (!pair->second.destroyed) {
+#ifdef DEBUG_LEVEL_1
       std::stringstream s;
       s << "utils::shader::OnInitPipeline(Reinserted pipeline: ";
       s << PRINT_PTR(pipeline.handle);
@@ -930,6 +931,7 @@ static void OnInitPipeline(
       s << ", Shader hashes: " << pair->second.shader_hashes.size() << " => " << details.shader_hashes.size();
       s << ")";
       reshade::log::message(reshade::log::level::warning, s.str().c_str());
+#endif
       if (pair->second.replacement_pipeline.handle != 0u) {
         device->destroy_pipeline(pair->second.replacement_pipeline);
       }
@@ -1086,7 +1088,8 @@ static void Use(DWORD fdw_reason) {
 
       break;
     case DLL_PROCESS_DETACH:
-
+      if (!attached) return;
+      attached = false;
       reshade::unregister_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::unregister_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
       reshade::unregister_event<reshade::addon_event::init_command_list>(OnInitCommandList);

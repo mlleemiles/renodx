@@ -22,7 +22,8 @@ SamplerState Samplers_1 : register(s0);
 float4 main(
     noperspective float2 TEXCOORD: TEXCOORD,
     noperspective float4 SV_Position: SV_Position,
-    nointerpolation uint SV_RenderTargetArrayIndex: SV_RenderTargetArrayIndex) : SV_Target {
+    nointerpolation uint SV_RenderTargetArrayIndex: SV_RenderTargetArrayIndex)
+    : SV_Target {
   uint output_gamut = OutputGamut;
   uint output_device = OutputDevice;
   float expand_gamut = ExpandGamut;
@@ -220,6 +221,11 @@ float4 main(
 
   // Will cause issues with grayscale scenes if moved above
   // SetUntonemappedAP1(_740, _742, _744);
+#if 1  // begin FilmToneMap with BlueCorrect
+  float _1081, _1082, _1083;
+  ApplyFilmToneMapWithBlueCorrect(_740, _742, _744,
+                                  _1081, _1082, _1083);
+#else
 
   float _759 = ((mad(0.061360642313957214f, _744, mad(-4.540197551250458e-09f, _742, (_740 * 0.9386394023895264f))) - _740) * BlueCorrection) + _740;
   float _760 = ((mad(0.169205904006958f, _744, mad(0.8307942152023315f, _742, (_740 * 6.775371730327606e-08f))) - _742) * BlueCorrection) + _742;
@@ -330,6 +336,7 @@ float4 main(
   float _1083 = ((mad(0.9999996423721313f, _1065, mad(2.0954757928848267e-08f, _1064, (_1063 * 1.862645149230957e-08f))) - _1065) * BlueCorrection) + _1065;
 #endif
 
+#endif
   // SetTonemappedAP1(_1081, _1082, _1083);
 
   /* float _1108 = saturate(max(0.0f, mad((WorkingColorSpace.FromAP1[0].z), _1083, mad((WorkingColorSpace.FromAP1[0].y), _1082, ((WorkingColorSpace.FromAP1[0].x) * _1081)))));
@@ -370,16 +377,22 @@ float4 main(
   float _1213;
   SampleLUTUpgradeToneMap(untonemapped_bt709, Samplers_1, Textures_1, _1211, _1212, _1213);
 
-  if (GenerateOutput(_1211, _1212, _1213, SV_Target, is_hdr)) {
-    return SV_Target;
-  }
-
   float _1239 = ColorScale.x * (((MappingPolynomial.y + (MappingPolynomial.x * _1211)) * _1211) + MappingPolynomial.z);
   float _1240 = ColorScale.y * (((MappingPolynomial.y + (MappingPolynomial.x * _1212)) * _1212) + MappingPolynomial.z);
   float _1241 = ColorScale.z * (((MappingPolynomial.y + (MappingPolynomial.x * _1213)) * _1213) + MappingPolynomial.z);
-  float _1262 = exp2(log2(max(0.0f, (lerp(_1239, OverlayColor.x, OverlayColor.w)))) * InverseGamma.y);
-  float _1263 = exp2(log2(max(0.0f, (lerp(_1240, OverlayColor.y, OverlayColor.w)))) * InverseGamma.y);
-  float _1264 = exp2(log2(max(0.0f, (lerp(_1241, OverlayColor.z, OverlayColor.w)))) * InverseGamma.y);
+  // Separate the lerp results into individual variables
+  float _1265 = lerp(_1239, OverlayColor.x, OverlayColor.w);
+  float _1266 = lerp(_1240, OverlayColor.y, OverlayColor.w);
+  float _1267 = lerp(_1241, OverlayColor.z, OverlayColor.w);
+
+  if (GenerateOutput(_1265, _1266, _1267, SV_Target, is_hdr)) {
+    return SV_Target;
+  }
+
+  // Apply gamma correction to each component
+  float _1262 = exp2(log2(max(0.0f, _1265)) * InverseGamma.y);
+  float _1263 = exp2(log2(max(0.0f, _1266)) * InverseGamma.y);
+  float _1264 = exp2(log2(max(0.0f, _1267)) * InverseGamma.y);
 
   if (WorkingColorSpace.bIsSRGB == 0) {
     float _1283 = mad((WorkingColorSpace.ToAP1[0].z), _1264, mad((WorkingColorSpace.ToAP1[0].y), _1263, ((WorkingColorSpace.ToAP1[0].x) * _1262)));

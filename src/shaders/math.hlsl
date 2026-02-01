@@ -1,86 +1,29 @@
 #ifndef SRC_SHADERS_MATH_HLSL_
 #define SRC_SHADERS_MATH_HLSL_
 
-#include "./cross.hlsl"
+#include "./math/constants.hlsl"
+#include "./math/cross.hlsl"
+#include "./math/select.hlsl"
+#include "./math/sign.hlsl"
 
 START_NAMESPACE(renodx)
 START_NAMESPACE(math)
-
-static const float FLT10_MAX = 64512.f;
-static const float FLT11_MAX = 65024.f;
-
-static const float FLT16_MIN = CROSS_COMPILE(asfloat(0x0400), 0.00006103515625);
-static const float FLT16_MAX = 65504.f;
-static const float FLT32_MIN = CROSS_COMPILE(asfloat(0x00800000), 1.17549435082228750797e-38);
-static const float FLT32_MAX = CROSS_COMPILE(asfloat(0x7F7FFFFF), 3.40282346638528859812e+38);
-static const float FLT_MIN = CROSS_COMPILE(asfloat(0x00800000), 1.17549435082228750797e-38);
-static const float FLT_MAX = CROSS_COMPILE(asfloat(0x7F7FFFFF), 3.40282346638528859812e+38);;
-static const float INFINITY = CROSS_COMPILE(asfloat(0x7F800000), 1.0 / 0.0);
-static const float NEG_INFINITY = CROSS_COMPILE(asfloat(0xFF800000), -1.0 / 0.0);
-static const float PI = 3.14159265358979323846f;
-
-#if __SHADER_TARGET_MAJOR >= 6 || defined(VULKAN)
-#define SIGN_FUNCTION_GENERATOR(T) \
-  T Sign(T x) {                    \
-    return sign(x);                \
-  }
-#else
-#define SIGN_FUNCTION_GENERATOR(T)                          \
-  T Sign(T x) {                                             \
-    return mad(saturate(mad(x, FLT_MAX, 0.5f)), 2.f, -1.f); \
-  }
-#endif
-
-#define SIGNPOW_FUNCTION_GENERATOR(struct)   \
-  struct SignPow(struct x, float exponent) { \
-    return Sign(x) * pow(abs(x), exponent);  \
-  }
-
-#define SIGNSQRT_FUNCTION_GENERATOR(struct) \
-  struct SignSqrt(struct x) {               \
-    return Sign(x) * sqrt(abs(x));          \
-  }
-
-#define CBRT_FUNCTION_GENERATOR(struct) \
-  struct Cbrt(struct x) {               \
-    return SignPow(x, 1.f / 3.f);       \
-  }
-
-#define ALL_FLOATS_FUNCTION_GENERATOR(generator) \
-  generator(float)                               \
-      generator(float2)                          \
-          generator(float3)                      \
-              generator(float4)
-
-ALL_FLOATS_FUNCTION_GENERATOR(SIGN_FUNCTION_GENERATOR)
-ALL_FLOATS_FUNCTION_GENERATOR(SIGNPOW_FUNCTION_GENERATOR)
-ALL_FLOATS_FUNCTION_GENERATOR(SIGNSQRT_FUNCTION_GENERATOR)
-ALL_FLOATS_FUNCTION_GENERATOR(CBRT_FUNCTION_GENERATOR)
-#undef SIGN_FUNCTION_GENERATOR
-#undef SIGNPOW_FUNCTION_GENERATOR
-#undef SIGNSQRT_FUNCTION_GENERATOR
-#undef CBRT_FUNCTION_GENERATOR
-#undef ALL_FLOATS_FUNCTION_GENERATOR
 
 float Average(float3 color) {
   return (color.x + color.y + color.z) / 3.f;
 }
 
 float DivideSafe(float dividend, float divisor) {
-  return (divisor == 0.f)
-             ? FLT_MAX * Sign(dividend)
-             : (dividend / divisor);
+  return Select(divisor == 0.f, CopySign(FLT_MAX, dividend), dividend / divisor);
 }
 
 float DivideSafe(float dividend, float divisor, float fallback) {
-  return (divisor == 0.f)
-             ? fallback
-             : (dividend / divisor);
+  return Select(divisor == 0.f, fallback, dividend / divisor);
 }
 
 float2 DivideSafe(float2 dividend, float2 divisor) {
-  return float2(DivideSafe(dividend.x, divisor.x, FLT_MAX * Sign(dividend.x)),
-                DivideSafe(dividend.y, divisor.y, FLT_MAX * Sign(dividend.y)));
+  return float2(DivideSafe(dividend.x, divisor.x, CopySign(FLT_MAX, dividend.x)),
+                DivideSafe(dividend.y, divisor.y, CopySign(FLT_MAX, dividend.y)));
 }
 
 float2 DivideSafe(float2 dividend, float2 divisor, float2 fallback) {
@@ -89,9 +32,9 @@ float2 DivideSafe(float2 dividend, float2 divisor, float2 fallback) {
 }
 
 float3 DivideSafe(float3 dividend, float3 divisor) {
-  return float3(DivideSafe(dividend.x, divisor.x, FLT_MAX * Sign(dividend.x)),
-                DivideSafe(dividend.y, divisor.y, FLT_MAX * Sign(dividend.y)),
-                DivideSafe(dividend.z, divisor.z, FLT_MAX * Sign(dividend.z)));
+  return float3(DivideSafe(dividend.x, divisor.x, CopySign(FLT_MAX, dividend.x)),
+                DivideSafe(dividend.y, divisor.y, CopySign(FLT_MAX, dividend.y)),
+                DivideSafe(dividend.z, divisor.z, CopySign(FLT_MAX, dividend.z)));
 }
 
 float3 DivideSafe(float3 dividend, float3 divisor, float3 fallback) {
@@ -107,20 +50,78 @@ float4 DivideSafe(float4 dividend, float4 divisor, float4 fallback) {
                 DivideSafe(dividend.w, divisor.w, fallback.w));
 }
 
-float Max(float x, float y, float z) {
-  return max(x, max(y, z));
-}
-
-float Max(float x, float y, float z, float w) {
-  return max(x, max(y, max(z, w)));
+float Min(float x, float y) {
+  return min(x, y);
 }
 
 float Min(float x, float y, float z) {
-  return min(x, min(y, z));
+  return Min(x, Min(y, z));
 }
 
 float Min(float x, float y, float z, float w) {
-  return min(x, min(y, min(z, w)));
+  return Min(x, Min(y, z, w));
+}
+
+float Min(float2 xy) {
+  return Min(xy.x, xy.y);
+}
+
+float Min(float3 xyz) {
+  return Min(xyz.x, xyz.y, xyz.z);
+}
+
+float Min(float4 xyzw) {
+  return Min(xyzw.x, xyzw.y, xyzw.z, xyzw.w);
+}
+
+float Max(float x, float y) {
+  return max(x, y);
+}
+
+float Max(float x, float y, float z) {
+  return Max(x, Max(y, z));
+}
+
+float Max(float x, float y, float z, float w) {
+  return Max(x, Max(y, z, w));
+}
+
+float Max(float2 xy) {
+  return Max(xy.x, xy.y);
+}
+
+float Max(float3 xyz) {
+  return Max(xyz.x, xyz.y, xyz.z);
+}
+
+float Max(float4 xyzw) {
+  return Max(xyzw.x, xyzw.y, xyzw.z, xyzw.w);
+}
+
+// Linear Normalization
+// normalize() is reserved in HLSL
+float Rescale(float x, float x_min, float x_max, float y_min = 0, float y_max = 1, bool clamp = false) {
+  float value = lerp(y_min, y_max, (x - x_min) / (x_max - x_min));
+  if (clamp) {
+    value = saturate(value);
+  }
+  return value;
+}
+
+float Rescale(float x, float x_min, float x_max, bool clamp) {
+  return Rescale(x, x_min, x_max, 0.f, 1.f, clamp);
+}
+
+float3 Rescale(float3 x, float3 x_min, float3 x_max, float3 y_min = float3(0, 0, 0), float3 y_max = float3(1, 1, 1), bool clamp = false) {
+  float3 value = lerp(y_min, y_max, (x - x_min) / (x_max - x_min));
+  if (clamp) {
+    value = saturate(value);
+  }
+  return value;
+}
+
+float3 Rescale(float3 x, float3 x_min, float3 x_max, bool clamp) {
+  return Rescale(x, x_min, x_max, float3(0, 0, 0), float3(1, 1, 1), clamp);
 }
 
 float3x3 Invert3x3(float3x3 m) {
@@ -139,7 +140,7 @@ float3x3 Invert3x3(float3x3 m) {
   float I = (a * e - b * d);
 
   float det = a * A + b * B + c * C;
-  float invDet = 1.0 / det;
+  float invDet = DivideSafe(1.0, det, 0.0);
 
   return float3x3(
              A, D, G,
@@ -147,6 +148,34 @@ float3x3 Invert3x3(float3x3 m) {
              C, F, I)
          * invDet;
 }
+
+#if __SHADER_TARGET_MAJOR >= 4 || defined(VULKAN)
+float ZeroNaN(float x) {
+  return Select(isnan(x), 0.f, x);
+}
+float2 ZeroNaN(float2 x) {
+  return Select(isnan(x), 0.f, x);
+}
+float3 ZeroNaN(float3 x) {
+  return Select(isnan(x), 0.f, x);
+}
+float4 ZeroNaN(float4 x) {
+  return Select(isnan(x), 0.f, x);
+}
+#else
+float ZeroNaN(float x) {
+  return Select(x != x, 0.f, x);
+}
+float2 ZeroNaN(float2 value) {
+  return float2(ZeroNaN(value.x), ZeroNaN(value.y));
+}
+float3 ZeroNaN(float3 value) {
+  return float3(ZeroNaN(value.x), ZeroNaN(value.y), ZeroNaN(value.z));
+}
+float4 ZeroNaN(float4 value) {
+  return float4(ZeroNaN(value.x), ZeroNaN(value.y), ZeroNaN(value.z), ZeroNaN(value.w));
+}
+#endif
 
 END_NAMESPACE(math)
 END_NAMESPACE(renodx)
