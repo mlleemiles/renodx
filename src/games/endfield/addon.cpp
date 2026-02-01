@@ -171,6 +171,7 @@ bool OnUpsampleFinish(reshade::api::command_list* cmd_list) {
 #endif
 
 renodx::mods::shader::CustomShaders custom_shaders = {
+/*
 #ifdef REMOVE_UI
 	{0xEFE8303C, {
 			 .crc32 = 0xEFE8303C,
@@ -183,6 +184,7 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 		 },
 	},
 #endif
+*/
 #ifdef RESHADE_AO
 	{0x47FB91F9, {
 			 .crc32 = 0x47FB91F9,
@@ -450,6 +452,7 @@ bool OnDrawIndexed(
     uint32_t first_instance) {
 	
 	// so that we don't check run every single draw indexed call
+  /*
 	if (isUIPass)
 	{
 		constexpr uint32_t PING_INDEX_COUNT = 18;
@@ -463,8 +466,35 @@ bool OnDrawIndexed(
 
 		isUIDInputCandidate = (first_index == UID_FIRST_INDEX) && isPingDrawn;
 	}
+    */
 
+  auto* shader_state = renodx::utils::shader::GetCurrentState(cmd_list);
+
+  auto* pixel_state = renodx::utils::shader::GetCurrentPixelState(shader_state);
+
+  auto pixel_shader_hash = renodx::utils::shader::GetCurrentPixelShaderHash(pixel_state);
+  if (pixel_shader_hash == 0xEFE8303C)
+  {
+		constexpr uint32_t PING_INDEX_COUNT = 18;
+		constexpr uint32_t PING_FIRST_INDEX = 0;
+		constexpr int32_t PING_VERTEX_OFFSET = 0;
+		constexpr uint32_t UID_FIRST_INDEX = 18;
+    isUIPass = true;
+    isPingInputCandidate = (index_count == PING_INDEX_COUNT) && 
+							   (first_index == PING_FIRST_INDEX) && 
+							   (vertex_offset == PING_VERTEX_OFFSET);
+    return isPingInputCandidate && (use_ping == 0.0f);
+  }
+  else if (pixel_shader_hash == 0x92BB9EA9)
+  {
+    constexpr uint32_t UID_FIRST_INDEX = 18;
+    isUIDInputCandidate = (first_index == UID_FIRST_INDEX) && isPingInputCandidate;
+    return isUIDInputCandidate && (use_uid == 0.0f);
+  }
+  else
+  {
     return false;
+  }
 }
 #endif
 
