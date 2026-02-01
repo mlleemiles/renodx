@@ -702,6 +702,8 @@ void OnBarrier(
     }
     */
 
+
+  // need better way to reset them but idk
   if (!hasAO)
   {
       custom_device_data->uav_ao = { 0 };
