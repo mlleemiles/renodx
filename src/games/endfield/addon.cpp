@@ -56,6 +56,7 @@ bool isUIPass = false;
 bool isPingInputCandidate = false;
 bool isPingDrawn = false;
 bool isUIDInputCandidate = false;
+uint32_t drawCallVertexCount = 0;
 #ifdef RESHADE_AO
 bool hasDenoised = false;
 bool hasUpscaled = false;
@@ -63,6 +64,8 @@ bool hasAO = false;
 bool hasDepth = false;
 bool hasNormal = false;
 bool hasMV = false;
+bool hasReshadeDrawn = false;
+bool startGbufferCapture = false;
 #endif
 float use_ping = 1.0f;
 float use_uid = 1.0f;
@@ -110,6 +113,7 @@ bool OnNormalDepthBlit(reshade::api::command_list* cmd_list) {
 	else if (current_rtv_desc.format == reshade::api::format::r10g10b10a2_unorm ) {
 		custom_device_data->srv_normal_worldspace = rtv0;
     hasNormal = true;
+    startGbufferCapture = true;
 	}
 
     return true;
@@ -162,7 +166,9 @@ bool OnUpsampleFinish(reshade::api::command_list* cmd_list) {
     if (data == nullptr) return true;
     const std::shared_lock lock(data->mutex);
     cmd_list->barrier(custom_device_data->uav_ao_texture, custom_device_data->uav_original_usages, reshade::api::resource_usage::render_target);
+    hasReshadeDrawn = true;
     for (auto* runtime : data->effect_runtimes) {
+      runtime->set_effects_state(true);
       runtime->render_effects(cmd_list, custom_device_data->uav_ao, custom_device_data->uav_ao);
     }
     cmd_list->barrier(custom_device_data->uav_ao_texture, reshade::api::resource_usage::render_target, custom_device_data->uav_original_usages);
@@ -191,11 +197,13 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 			 .on_draw = &OnNormalDepthBlit,
 		 },
 	},
+  /*
 	{0xC14B0925, {
 			 .crc32 = 0xC14B0925,
 			 .on_draw = &OnMotionBlit,
 		 },
 	},
+  */
 	{0x3F1D52C5, {
 			 .crc32 = 0x3F1D52C5,
        .code = __0x3F1D52C5,
@@ -443,6 +451,13 @@ void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
 }
 
 #ifdef REMOVE_UI
+bool OnDraw(reshade::api::command_list *cmd_list, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
+{
+  drawCallVertexCount = vertex_count;
+  return false;
+
+}
+
 bool OnDrawIndexed(
     reshade::api::command_list* cmd_list,
     uint32_t index_count,
@@ -450,24 +465,6 @@ bool OnDrawIndexed(
     uint32_t first_index,
     int32_t vertex_offset,
     uint32_t first_instance) {
-	
-	// so that we don't check run every single draw indexed call
-  /*
-	if (isUIPass)
-	{
-		constexpr uint32_t PING_INDEX_COUNT = 18;
-		constexpr uint32_t PING_FIRST_INDEX = 0;
-		constexpr int32_t PING_VERTEX_OFFSET = 0;
-		constexpr uint32_t UID_FIRST_INDEX = 18;
-
-		isPingInputCandidate = (index_count == PING_INDEX_COUNT) && 
-							   (first_index == PING_FIRST_INDEX) && 
-							   (vertex_offset == PING_VERTEX_OFFSET);
-
-		isUIDInputCandidate = (first_index == UID_FIRST_INDEX) && isPingDrawn;
-	}
-    */
-
   auto* shader_state = renodx::utils::shader::GetCurrentState(cmd_list);
 
   auto* pixel_state = renodx::utils::shader::GetCurrentPixelState(shader_state);
@@ -478,21 +475,27 @@ bool OnDrawIndexed(
 		constexpr uint32_t PING_INDEX_COUNT = 18;
 		constexpr uint32_t PING_FIRST_INDEX = 0;
 		constexpr int32_t PING_VERTEX_OFFSET = 0;
-		constexpr uint32_t UID_FIRST_INDEX = 18;
     isUIPass = true;
-    isPingInputCandidate = (index_count == PING_INDEX_COUNT) && 
+    bool isPingInputCandidateLocal = ((index_count - drawCallVertexCount*2) == PING_INDEX_COUNT) && 
 							   (first_index == PING_FIRST_INDEX) && 
 							   (vertex_offset == PING_VERTEX_OFFSET);
-    return isPingInputCandidate && (use_ping == 0.0f);
+    isPingInputCandidate = isPingInputCandidateLocal;
+    drawCallVertexCount = 0;
+
+    return isPingInputCandidateLocal && (use_ping == 0.0f);
   }
   else if (pixel_shader_hash == 0x92BB9EA9)
   {
     constexpr uint32_t UID_FIRST_INDEX = 18;
-    isUIDInputCandidate = (first_index == UID_FIRST_INDEX) && isPingInputCandidate;
+		constexpr uint32_t UID_INDEX_COUNT = 100;
+    constexpr int32_t UID_VERTEX_OFFSET = 12;
+    isUIDInputCandidate = (first_index == UID_FIRST_INDEX) && (index_count > UID_INDEX_COUNT) && (vertex_offset == UID_VERTEX_OFFSET) && isPingInputCandidate;
+    drawCallVertexCount = 0;
     return isUIDInputCandidate && (use_uid == 0.0f);
   }
   else
   {
+    drawCallVertexCount = 0;
     return false;
   }
 }
@@ -510,6 +513,7 @@ void OnPresent(
 	isUIDInputCandidate = false;
 	isPingDrawn = false;
 	isUIPass = false;
+  drawCallVertexCount = 0;
 #ifdef RESHADE_AO
   hasAO = false;
   hasDenoised = false;
@@ -517,6 +521,8 @@ void OnPresent(
   hasDepth = false;
   hasNormal = false;
   hasMV = false;
+  hasReshadeDrawn = false;
+  startGbufferCapture = false;
 #endif
 	
 }
@@ -531,7 +537,7 @@ void OnDestroyDevice(reshade::api::device* device) {
     renodx::utils::data::Delete<DeviceData>(device);
 }
 
-void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::command_list *cmd_list, reshade::api::resource_view, reshade::api::resource_view) {
+void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::command_list *cmd_list, reshade::api::resource_view rtv, reshade::api::resource_view rtv_srgb) {
     auto* device = cmd_list->get_device();
 	
     auto* renodx_device_data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(device);
@@ -541,7 +547,33 @@ void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::c
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return;
 
-	  //if (!hasAO) return;
+    // somehow this works now
+    // resets all the views if not present this frame
+    if (!hasAO)
+    {
+        custom_device_data->uav_ao = { 0 };
+        custom_device_data->uav_original_usages = (reshade::api::resource_usage::undefined);
+        custom_device_data->uav_resource_handle = 0;
+    }
+
+    if (!hasDepth)
+    {
+        custom_device_data->srv_depth = { 0 };
+    }
+
+    if (!hasNormal)
+    {
+        custom_device_data->srv_normal_worldspace = { 0 };
+    }
+
+    if (!hasMV)
+    {
+        custom_device_data->srv_mv = { 0 };
+    }
+
+    if (!hasReshadeDrawn) {
+      runtime->set_effects_state(false);
+    }
 
     for (auto* runtime : renodx_device_data->effect_runtimes) {
         if (runtime == nullptr) continue;
@@ -629,6 +661,30 @@ std::vector<reshade::api::resource_view> GetResourceViewsFromResource(const resh
     return result_views;
 }
 
+void OnBeginRenderPass(
+    reshade::api::command_list* cmd_list,
+    uint32_t count, const reshade::api::render_pass_render_target_desc* rts,
+    const reshade::api::render_pass_depth_stencil_desc* ds) {
+      if (!startGbufferCapture) return;
+      startGbufferCapture = false;
+      auto* device = cmd_list->get_device();
+      auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
+      if (custom_device_data == nullptr) return;
+
+      for (uint32_t i = 0; i < count; i++) {
+        // 0 - emissive
+        // 1 - mv
+        // 2 - rough ao translucency
+        // 3 - normal worldspace
+        // 4 - albedo
+          if (i == 1)
+          {
+            custom_device_data->srv_mv = rts[i].view;
+            hasMV = true;
+          }
+      }
+
+}
 
 void OnBarrier(
     reshade::api::command_list* cmd_list,
@@ -704,27 +760,7 @@ void OnBarrier(
 
 
   // need better way to reset them but idk
-  if (!hasAO)
-  {
-      custom_device_data->uav_ao = { 0 };
-      custom_device_data->uav_original_usages = (reshade::api::resource_usage::undefined);
-      custom_device_data->uav_resource_handle = 0;
-  }
 
-  if (!hasDepth)
-  {
-      custom_device_data->srv_depth = { 0 };
-  }
-
-  if (!hasNormal)
-  {
-      custom_device_data->srv_normal_worldspace = { 0 };
-  }
-
-  if (!hasMV)
-  {
-      custom_device_data->srv_mv = { 0 };
-  }
 
   return;
 
@@ -1044,20 +1080,23 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 	  reshade::register_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::register_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
+    reshade::register_event<reshade::addon_event::draw>(OnDraw);
 #endif
 	  
 #ifdef RESHADE_AO
       reshade::register_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::register_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
 	  reshade::register_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
+    reshade::register_event<reshade::addon_event::begin_render_pass>(OnBeginRenderPass);
     reshade::register_event<reshade::addon_event::barrier>(OnBarrier);
 
 #ifdef TRACE_DESC
 	    reshade::register_event<reshade::addon_event::dispatch>(OnDispatchTest);
+      reshade::register_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
       reshade::register_event<reshade::addon_event::init_command_list>(OnInitCommandList);
       reshade::register_event<reshade::addon_event::reset_command_list>(OnResetCommandList);
       reshade::register_event<reshade::addon_event::destroy_command_list>(OnDestroyCommandList);
-      reshade::register_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
+
 #endif
 #endif
       if (!initialized) {
@@ -1071,16 +1110,19 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 	  reshade::unregister_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::unregister_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
+    reshade::unregister_event<reshade::addon_event::draw>(OnDraw);
 #endif
 
 #ifdef RESHADE_AO
       reshade::unregister_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::unregister_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
 	  reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
+    reshade::unregister_event<reshade::addon_event::begin_render_pass>(OnBeginRenderPass);
     reshade::unregister_event<reshade::addon_event::barrier>(OnBarrier);
 
 #ifdef TRACE_DESC
       reshade::unregister_event<reshade::addon_event::dispatch>(OnDispatchTest);
+    reshade::unregister_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
       reshade::unregister_event<reshade::addon_event::init_command_list>(OnInitCommandList);
       reshade::unregister_event<reshade::addon_event::reset_command_list>(OnResetCommandList);
       reshade::unregister_event<reshade::addon_event::destroy_command_list>(OnDestroyCommandList);
