@@ -41,7 +41,7 @@ struct ShaderInjectData {
 
   float ao_thickness;
   float ao_denoiser_blur_beta;
-  float pad1;
+  float ui_disable_flag;
   float pad2;
 };
 
@@ -83,7 +83,7 @@ layout(push_constant) uniform PushData {
 
   float ao_thickness;
   float ao_denoiser_blur_beta;
-  float pad1;
+  float ui_disable_flag;
   float pad2;
 }
 shader_injection;

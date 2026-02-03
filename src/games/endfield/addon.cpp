@@ -9,7 +9,7 @@
 //#define DEBUG_LEVEL_1
 //#define DEBUG_LEVEL_2
 
-#define RESHADE_AO
+//#define RESHADE_AO
 #define REMOVE_UI
 
 #include <embed/shaders.h>
@@ -51,12 +51,20 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
 int16_t screen_width = 0;
 int16_t screen_height = 0;
 
-
-bool isUIPass = false;
 bool isPingInputCandidate = false;
 bool isPingDrawn = false;
 bool isUIDInputCandidate = false;
-uint32_t drawCallVertexCount = 0;
+
+struct DrawIndexedInstancedParams {
+    uint32_t index_count;
+    uint32_t instance_count;
+    uint32_t first_index;
+    int32_t vertex_offset;
+    uint32_t first_instance;
+};
+
+DrawIndexedInstancedParams drawParams;
+
 #ifdef RESHADE_AO
 bool hasDenoised = false;
 bool hasUpscaled = false;
@@ -70,18 +78,27 @@ bool startGbufferCapture = false;
 float use_ping = 1.0f;
 float use_uid = 1.0f;
 
+ShaderInjectData shader_injection;
+
 #ifdef REMOVE_UI
 bool OnPingDraw(reshade::api::command_list* cmd_list) {
-	  isUIPass = true;
-    isPingDrawn = isPingInputCandidate;
-    return !isPingInputCandidate || (use_ping != 0.0f);
+		constexpr uint32_t PING_INDEX_COUNT = 18;
+		constexpr uint32_t PING_FIRST_INDEX = 0;
+		constexpr int32_t PING_VERTEX_OFFSET = 0;
+    isPingInputCandidate = (drawParams.index_count == PING_INDEX_COUNT) && 
+							   (drawParams.first_index == PING_FIRST_INDEX) && 
+							   (drawParams.vertex_offset == PING_VERTEX_OFFSET);
+    shader_injection.ui_disable_flag = isPingInputCandidate && (use_ping == 0.0f) ? 1.0f : 0.0f;
+    return true;
 	
 }
 
 bool OnUIDDraw(reshade::api::command_list* cmd_list) {
-	
-	return !isUIDInputCandidate || (use_uid != 0.0f);
-	
+    constexpr uint32_t UID_FIRST_INDEX = 18;
+		constexpr uint32_t UID_INDEX_COUNT = 100; //min = (2 (ms) + 4 (uid:) + 10 (uid) + (1 to 4 for ping)) * 6 = 102 min, 120 max or (102 || 108 || 114 || 120)
+    constexpr int32_t UID_VERTEX_OFFSET = 12;
+    isUIDInputCandidate = (drawParams.first_index == UID_FIRST_INDEX) && (drawParams.index_count > UID_INDEX_COUNT) && (drawParams.vertex_offset == UID_VERTEX_OFFSET) && isPingInputCandidate;
+    return !(isUIDInputCandidate && (use_uid == 0.0f));
 }
 #endif
 
@@ -177,20 +194,22 @@ bool OnUpsampleFinish(reshade::api::command_list* cmd_list) {
 #endif
 
 renodx::mods::shader::CustomShaders custom_shaders = {
-/*
+
 #ifdef REMOVE_UI
-	{0xEFE8303C, {
-			 .crc32 = 0xEFE8303C,
+	{0xEA9EED6C, {
+			 .crc32 = 0xEA9EED6C,
+       .code = __0xEA9EED6C,
 			 .on_draw = &OnPingDraw,
+       .on_drawn = [](auto* cmd_list) { shader_injection.ui_disable_flag = 0.0f; return true; },
 		 },
 	},
-	{0x92BB9EA9, {
+  {0x92BB9EA9, {
 			 .crc32 = 0x92BB9EA9,
 			 .on_draw = &OnUIDDraw,
 		 },
 	},
 #endif
-*/
+
 #ifdef RESHADE_AO
 	{0x47FB91F9, {
 			 .crc32 = 0x47FB91F9,
@@ -227,8 +246,6 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 */
 	__ALL_CUSTOM_SHADERS,
 };
-
-ShaderInjectData shader_injection;
 
 const std::string build_date = __DATE__;
 const std::string build_time = __TIME__;
@@ -451,13 +468,6 @@ void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
 }
 
 #ifdef REMOVE_UI
-bool OnDraw(reshade::api::command_list *cmd_list, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
-{
-  drawCallVertexCount = vertex_count;
-  return false;
-
-}
-
 bool OnDrawIndexed(
     reshade::api::command_list* cmd_list,
     uint32_t index_count,
@@ -465,39 +475,14 @@ bool OnDrawIndexed(
     uint32_t first_index,
     int32_t vertex_offset,
     uint32_t first_instance) {
-  auto* shader_state = renodx::utils::shader::GetCurrentState(cmd_list);
 
-  auto* pixel_state = renodx::utils::shader::GetCurrentPixelState(shader_state);
+    drawParams.index_count = index_count;
+    drawParams.instance_count = instance_count;
+    drawParams.first_index = first_index;
+    drawParams.vertex_offset = vertex_offset;
+    drawParams.first_instance = first_instance;
 
-  auto pixel_shader_hash = renodx::utils::shader::GetCurrentPixelShaderHash(pixel_state);
-  if (pixel_shader_hash == 0xEFE8303C)
-  {
-		constexpr uint32_t PING_INDEX_COUNT = 18;
-		constexpr uint32_t PING_FIRST_INDEX = 0;
-		constexpr int32_t PING_VERTEX_OFFSET = 0;
-    isUIPass = true;
-    bool isPingInputCandidateLocal = ((index_count - drawCallVertexCount*2) == PING_INDEX_COUNT) && 
-							   (first_index == PING_FIRST_INDEX) && 
-							   (vertex_offset == PING_VERTEX_OFFSET);
-    isPingInputCandidate = isPingInputCandidateLocal;
-    drawCallVertexCount = 0;
-
-    return isPingInputCandidateLocal && (use_ping == 0.0f);
-  }
-  else if (pixel_shader_hash == 0x92BB9EA9)
-  {
-    constexpr uint32_t UID_FIRST_INDEX = 18;
-		constexpr uint32_t UID_INDEX_COUNT = 100;
-    constexpr int32_t UID_VERTEX_OFFSET = 12;
-    isUIDInputCandidate = (first_index == UID_FIRST_INDEX) && (index_count > UID_INDEX_COUNT) && (vertex_offset == UID_VERTEX_OFFSET) && isPingInputCandidate;
-    drawCallVertexCount = 0;
-    return isUIDInputCandidate && (use_uid == 0.0f);
-  }
-  else
-  {
-    drawCallVertexCount = 0;
     return false;
-  }
 }
 #endif
 
@@ -512,8 +497,7 @@ void OnPresent(
 	isPingInputCandidate = false;
 	isUIDInputCandidate = false;
 	isPingDrawn = false;
-	isUIPass = false;
-  drawCallVertexCount = 0;
+  drawParams = {0, 0, 0, 0, 0};
 #ifdef RESHADE_AO
   hasAO = false;
   hasDenoised = false;
@@ -1080,7 +1064,6 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 	  reshade::register_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::register_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
-    reshade::register_event<reshade::addon_event::draw>(OnDraw);
 #endif
 	  
 #ifdef RESHADE_AO
@@ -1110,7 +1093,6 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 	  reshade::unregister_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::unregister_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
-    reshade::unregister_event<reshade::addon_event::draw>(OnDraw);
 #endif
 
 #ifdef RESHADE_AO
