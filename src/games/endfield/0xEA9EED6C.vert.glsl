@@ -100,18 +100,18 @@ void main()
     vec4 _173;
 	
 	const vec2 verts[12] = vec2[12](
-		vec2(-1167.0001220703, -653.4990234375),
-		vec2(-1167.0001220703, -644.4990234375),
-		vec2(-1162.0001220703, -644.4990234375),
-		vec2(-1162.0001220703, -653.4990234375),
-		vec2(-1160.5, -653.4990234375),
-		vec2(-1160.5, -640.4990234375),
-		vec2(-1155.5, -640.4990234375),
-		vec2(-1155.5, -653.4990234375),
-		vec2(-1154.0, -653.4990234375),
-		vec2(-1154.0, -636.4990234375),
-		vec2(-1149.0, -636.4990234375),
-		vec2(-1149.0, -653.4990234375)
+		vec2(-1167.0, 21.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1167.0, 30.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1162.0, 30.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1162.0, 21.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1160.5, 21.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1160.5, 34.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1155.5, 34.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1155.5, 21.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1154.0, 21.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1154.0, 38.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1149.0, 38.5 - 1200.0 * shader_injection.ui_aspect_ratio),
+		vec2(-1149.0, 21.5 - 1200.0 * shader_injection.ui_aspect_ratio)
 	);
     
 	if (shader_injection.ui_disable_flag != 0.0)

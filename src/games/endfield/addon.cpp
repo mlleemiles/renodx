@@ -51,8 +51,8 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
 int16_t screen_width = 0;
 int16_t screen_height = 0;
 
+#ifdef REMOVE_UI
 bool isPingInputCandidate = false;
-bool isPingDrawn = false;
 bool isUIDInputCandidate = false;
 
 struct DrawIndexedInstancedParams {
@@ -64,6 +64,10 @@ struct DrawIndexedInstancedParams {
 };
 
 DrawIndexedInstancedParams drawParams;
+float use_ping = 1.0f;
+float use_uid = 1.0f;
+//float ui_aspect = 1.0f;
+#endif
 
 #ifdef RESHADE_AO
 bool hasDenoised = false;
@@ -75,8 +79,7 @@ bool hasMV = false;
 bool hasReshadeDrawn = false;
 bool startGbufferCapture = false;
 #endif
-float use_ping = 1.0f;
-float use_uid = 1.0f;
+
 
 ShaderInjectData shader_injection;
 
@@ -88,6 +91,12 @@ bool OnPingDraw(reshade::api::command_list* cmd_list) {
     isPingInputCandidate = (drawParams.index_count == PING_INDEX_COUNT) && 
 							   (drawParams.first_index == PING_FIRST_INDEX) && 
 							   (drawParams.vertex_offset == PING_VERTEX_OFFSET);
+    /*
+    if (shader_injection.ui_aspect_ratio != ui_aspect)
+    {
+        shader_injection.ui_aspect_ratio = ui_aspect;
+    }
+    */
     shader_injection.ui_disable_flag = isPingInputCandidate && (use_ping == 0.0f) ? 1.0f : 0.0f;
     return true;
 	
@@ -456,6 +465,12 @@ void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
 
 	auto bb = device->get_resource_desc(swapchain->get_current_back_buffer());
 	if (bb.type == reshade::api::resource_type::unknown) return;
+    
+    shader_injection.ui_aspect_ratio = static_cast<float>(bb.texture.height) / static_cast<float>(bb.texture.width);
+    /*
+    reshade::log::message(
+        reshade::log::level::debug,
+        std::format("Swapchain - width:{} height:{} ratio:{}", static_cast<float>(bb.texture.width), static_cast<float>(bb.texture.height), ui_aspect).c_str());*/
   
     for (auto& target : data->swap_chain_upgrade_targets) {
         target.dimensions = {
@@ -493,11 +508,11 @@ void OnPresent(
     const reshade::api::rect* dest_rect,
     uint32_t dirty_rect_count,
     const reshade::api::rect* dirty_rects) {
-		
+#ifdef REMOVE_UI
 	isPingInputCandidate = false;
 	isUIDInputCandidate = false;
-	isPingDrawn = false;
   drawParams = {0, 0, 0, 0, 0};
+#endif
 #ifdef RESHADE_AO
   hasAO = false;
   hasDenoised = false;
