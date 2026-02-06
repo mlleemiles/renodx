@@ -1,7 +1,9 @@
-// AO upscale
+// SSR mip0 blend to accumulated mips
 
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "./shared.h"
 
 layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
 {
@@ -164,58 +166,57 @@ layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
     vec4 _HackTempDataBeforeCPPPlugin[32];
 } ShaderVariablesGlobal;
 
-layout(set = 0, binding = 2) uniform sampler s_linear_clamp_sampler;
-layout(set = 0, binding = 1) uniform texture2D _GTAOBlurAOTermRT;
-layout(set = 0, binding = 0, r8) uniform writeonly image2D _GTAOUpsampleAOTermRT;
+layout(set = 1, binding = 1, std140) uniform type_ScreenSpaceReflectionData
+{
+    vec4 _SSRParams0;
+    vec4 _SSRParams1;
+    vec4 _SSRParams2;
+    vec4 _SSRParams3;
+    vec4 _SSRParams4;
+    vec4 _SSRParams5;
+    vec4 _SSRPreviousColorPyramidRenderSize;
+    vec4 _SSRCurrentColorPyramidRenderSize;
+} _ScreenSpaceReflectionData;
 
-const float DEPTH_SIGMA = 0.1;   // depth sensitivity
-const int KERNEL_RADIUS = 1;      // 5x5 kernel
+layout(set = 0, binding = 4) uniform sampler s_point_clamp_sampler;
+layout(set = 0, binding = 5) uniform sampler s_linear_clamp_sampler;
+layout(set = 0, binding = 1) uniform texture2D _SSRFilterWeightTexture;
+layout(set = 0, binding = 2) uniform texture2D _SSRCurrentTemporalColorTexture;
+layout(set = 0, binding = 3) uniform texture2D _SSRColorResolveTexture;
+layout(set = 0, binding = 0, r11f_g11f_b10f) uniform writeonly image2D _SSRColorUpsampleRWTexture;
 
 void main()
 {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    vec2 uv = (vec2(pix) + 0.5) * ShaderVariablesGlobal._ScreenSize.zw;
-
-    // Center depth
-    float centerDepth = textureLod(sampler2D(_GTAOBlurAOTermRT, s_linear_clamp_sampler), uv, 0.0).y;
-	float aoCenter = textureLod(sampler2D(_GTAOBlurAOTermRT, s_linear_clamp_sampler), uv, 0.0).x;
-
-    float aoSum = 0.0;
-    float weightSum = 0.0;
-
-    // Kernel
-    for (int y = -KERNEL_RADIUS; y <= KERNEL_RADIUS; y++)
-    {
-        for (int x = -KERNEL_RADIUS; x <= KERNEL_RADIUS; x++)
-        {
-            vec2 offset = vec2(x, y) * ShaderVariablesGlobal._ScreenSize.zw;
-            vec2 sampleUV = uv + offset;
-
-            vec2 sampleRG = textureLod(sampler2D(_GTAOBlurAOTermRT, s_linear_clamp_sampler), sampleUV, 0.0).rg;
-            float ao = sampleRG.r;
-            float depth = sampleRG.g;
-
-            // Spatial Gaussian weight
-            float spatialWeight = exp(-(x*x + y*y) / (2.0 * float(KERNEL_RADIUS*KERNEL_RADIUS)));
-
-            // Depth bilateral weight
-            float depthDiff = abs(depth - centerDepth);
-            float depthWeight = exp2(-depthDiff * 20.0);
-			
-			float aoDiff = abs(ao - aoCenter);
-
-			// AO-domain bilateral weight
-			float aoWeight = exp2(-aoDiff * 20.0);
-
-            float w = spatialWeight * depthWeight * aoWeight;
-
-            aoSum += ao * w;
-            weightSum += w;
-        }
-    }
-
-    float aoOut = aoSum / max(weightSum, 1e-5);
-
-    imageStore(_GTAOUpsampleAOTermRT, pix, vec4(aoOut, 0, 0, 0));
+    vec2 _64 = (vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) * ShaderVariablesGlobal._ScreenSize.zw;
+	
+	float mip = (textureLod(sampler2D(_SSRFilterWeightTexture, s_point_clamp_sampler), _64, 0.0).y * _ScreenSpaceReflectionData._SSRParams5.y);	//filter weight * max mip
+	
+	vec4 color;
+	
+	if (mip < shader_injection.ssr_mip_threshold)
+	{
+		color = textureLod(sampler2D(_SSRCurrentTemporalColorTexture, s_linear_clamp_sampler), _64, 0.0).xyzz;
+		color *= vec4(1.0 / (1.0 - max(max(color.x, color.y), color.z)));
+	}
+	else
+	{
+		float mip0 = floor(mip);
+		float fraction = clamp(mip - mip0, 0.0, 1.0);
+		vec4 color_mip0 = textureLod(sampler2D(_SSRCurrentTemporalColorTexture, s_linear_clamp_sampler), _64, 0.0).xyzz;
+		vec4 color_mip1 = textureLod(sampler2D(_SSRColorResolveTexture, s_linear_clamp_sampler), _64, 0.0).xyzz;
+		color_mip0 *= vec4(1.0 / (1.0 - max(max(color_mip0.x, color_mip0.y), color_mip0.z)));
+		
+		if (mip0 == 0.0)
+		{
+			color = mix(color_mip0, color_mip1, fraction);
+		}
+		else
+		{
+			color = color_mip1;
+		}
+	}
+	
+    vec4 _68 = textureLod(sampler2D(_SSRCurrentTemporalColorTexture, s_linear_clamp_sampler), _64, 0.0);
+    imageStore(_SSRColorUpsampleRWTexture, ivec2(gl_GlobalInvocationID.xy), color.xyzz);
 }
 

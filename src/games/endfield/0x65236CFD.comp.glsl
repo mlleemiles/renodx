@@ -1,3 +1,5 @@
+// AO main
+
 #version 460
 #if defined(GL_EXT_control_flow_attributes)
 #extension GL_EXT_control_flow_attributes : require
@@ -193,7 +195,7 @@ layout(set = 1, binding = 1, std140) uniform type_GTAOData
 #define AO_DISTRIBUTION_POWER ((shader_injection.ao_distribution_power != 0.0f) ? shader_injection.ao_distribution_power : _GTAOData._GTAOParam0.w)
 #define AO_THIN_OCCLUDER      ((shader_injection.ao_thin_occluder != 0.0f) ? shader_injection.ao_thin_occluder : _GTAOData._GTAOParam1.x)
 #define AO_GAMMA_GTAO         ((shader_injection.ao_gamma != 0.0f) ? shader_injection.ao_gamma : _GTAOData._GTAOParam1.y)
-#define AO_TEMPORAL_FRAME     ((shader_injection.ao_temporal_frame != 0.0f) ? uint(shader_injection.ao_temporal_frame) : 64u)
+#define AO_TEMPORAL_FRAME     64u
 #define AO_MIP_BIAS           ((shader_injection.ao_mip_bias != 0.0f) ? shader_injection.ao_mip_bias : _GTAOData._GTAOParam1.w)
 #define AO_DIRECTION_COUNT    ((shader_injection.ao_direction_count != 0.0f) ? shader_injection.ao_direction_count : 3.0f)
 #define AO_STEP_COUNT         ((shader_injection.ao_step_count != 0.0f) ? shader_injection.ao_step_count : 3.0f)

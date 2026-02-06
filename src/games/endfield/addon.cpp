@@ -80,6 +80,13 @@ bool hasReshadeDrawn = false;
 bool startGbufferCapture = false;
 #endif
 
+std::vector<std::string> generateNumberLabels(int start, int end, int step = 1) {
+    std::vector<std::string> labels;
+    for (int i = start; i <= end; i += step) {
+        labels.emplace_back(std::to_string(i));
+    }
+    return labels;
+}
 
 ShaderInjectData shader_injection;
 
@@ -418,6 +425,40 @@ renodx::utils::settings::Settings settings = {
         .min = 0.f,
         .max = 16.f,
         .format = "%.2f",
+    },
+    new renodx::utils::settings::Setting{
+        .key = "SSRMip",
+        .binding = &shader_injection.ssr_mip_threshold,
+        .default_value = 0.25f,
+        .label = "SSR Mipmap Threshold",
+        .section = "Reflections",
+        .tooltip = "",
+        .min = 0.f,
+        .max = 2.f,
+        .format = "%.2f",
+    },
+	new renodx::utils::settings::Setting{
+        .key = "SSRStepScale",
+        .binding = &shader_injection.ssr_step_scale,
+        .default_value = 1.0f,
+        .label = "SSR Step Count Scale",
+        .section = "Reflections",
+        .tooltip = "",
+        .min = 0.f,
+        .max = 16.f,
+        .format = "%.2f",
+    },
+	new renodx::utils::settings::Setting{
+        .key = "SSRMaxStep",
+        .binding = &shader_injection.ssr_step_max,
+        .value_type = renodx::utils::settings::SettingValueType::INTEGER,
+        .default_value = 32.0f,
+        .label = "SSR Min Step Count",
+        .section = "Reflections",
+        .tooltip = "",
+        .labels = generateNumberLabels(0, 256, 1),
+        .min = 1.f,
+        .max = 256.0f,
     },
 #ifdef REMOVE_UI
 	new renodx::utils::settings::Setting{

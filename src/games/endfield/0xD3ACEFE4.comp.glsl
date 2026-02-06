@@ -1,7 +1,11 @@
-// AO upscale
+// SSR Resolve mips
 
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "./shared.h"
+
+const float _74[4][4] = float[][](float[](0.015625, 0.046875, 0.046875, 0.015625), float[](0.046875, 0.140625, 0.140625, 0.046875), float[](0.046875, 0.140625, 0.140625, 0.046875), float[](0.015625, 0.046875, 0.046875, 0.015625));
 
 layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
 {
@@ -164,58 +168,98 @@ layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
     vec4 _HackTempDataBeforeCPPPlugin[32];
 } ShaderVariablesGlobal;
 
-layout(set = 0, binding = 2) uniform sampler s_linear_clamp_sampler;
-layout(set = 0, binding = 1) uniform texture2D _GTAOBlurAOTermRT;
-layout(set = 0, binding = 0, r8) uniform writeonly image2D _GTAOUpsampleAOTermRT;
+layout(set = 1, binding = 1, std140) uniform type_ScreenSpaceReflectionData
+{
+    vec4 _SSRParams0;
+    vec4 _SSRParams1;
+    vec4 _SSRParams2;
+    vec4 _SSRParams3;
+    vec4 _SSRParams4;
+    vec4 _SSRParams5;
+    vec4 _SSRPreviousColorPyramidRenderSize;
+    vec4 _SSRCurrentColorPyramidRenderSize;
+} _ScreenSpaceReflectionData;
 
-const float DEPTH_SIGMA = 0.1;   // depth sensitivity
-const int KERNEL_RADIUS = 1;      // 5x5 kernel
+layout(set = 0, binding = 4) uniform sampler s_point_clamp_sampler;
+layout(set = 0, binding = 5) uniform sampler s_linear_clamp_sampler;
+layout(set = 0, binding = 1) uniform texture2D _SSRCurrentSceneDepthPyramidTexture;
+layout(set = 0, binding = 2) uniform texture2D _SSRFilterWeightTexture;
+layout(set = 0, binding = 3) uniform texture2D _SSRColorPyramidTexture;
+layout(set = 0, binding = 0, r11f_g11f_b10f) uniform writeonly image2D _SSRColorResolveRWTexture;
 
 void main()
 {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    vec2 uv = (vec2(pix) + 0.5) * ShaderVariablesGlobal._ScreenSize.zw;
-
-    // Center depth
-    float centerDepth = textureLod(sampler2D(_GTAOBlurAOTermRT, s_linear_clamp_sampler), uv, 0.0).y;
-	float aoCenter = textureLod(sampler2D(_GTAOBlurAOTermRT, s_linear_clamp_sampler), uv, 0.0).x;
-
-    float aoSum = 0.0;
-    float weightSum = 0.0;
-
-    // Kernel
-    for (int y = -KERNEL_RADIUS; y <= KERNEL_RADIUS; y++)
+    vec3 _244;
+    do
     {
-        for (int x = -KERNEL_RADIUS; x <= KERNEL_RADIUS; x++)
+        vec2 _82 = vec2(ivec2(gl_GlobalInvocationID.xy));
+        vec2 _87 = (_82 + vec2(0.5)) * _ScreenSpaceReflectionData._SSRParams0.zw;
+        float _99 = 1.0 / ((ShaderVariablesGlobal._ZBufferParams.z * textureLod(sampler2D(_SSRCurrentSceneDepthPyramidTexture, s_point_clamp_sampler), _87, 0.0).x) + ShaderVariablesGlobal._ZBufferParams.w);
+        float _107 = textureLod(sampler2D(_SSRFilterWeightTexture, s_point_clamp_sampler), _87, 0.0).y * _ScreenSpaceReflectionData._SSRParams5.y;
+        if (_107 < shader_injection.ssr_mip_threshold)
         {
-            vec2 offset = vec2(x, y) * ShaderVariablesGlobal._ScreenSize.zw;
-            vec2 sampleUV = uv + offset;
-
-            vec2 sampleRG = textureLod(sampler2D(_GTAOBlurAOTermRT, s_linear_clamp_sampler), sampleUV, 0.0).rg;
-            float ao = sampleRG.r;
-            float depth = sampleRG.g;
-
-            // Spatial Gaussian weight
-            float spatialWeight = exp(-(x*x + y*y) / (2.0 * float(KERNEL_RADIUS*KERNEL_RADIUS)));
-
-            // Depth bilateral weight
-            float depthDiff = abs(depth - centerDepth);
-            float depthWeight = exp2(-depthDiff * 20.0);
-			
-			float aoDiff = abs(ao - aoCenter);
-
-			// AO-domain bilateral weight
-			float aoWeight = exp2(-aoDiff * 20.0);
-
-            float w = spatialWeight * depthWeight * aoWeight;
-
-            aoSum += ao * w;
-            weightSum += w;
+            vec4 _114 = textureLod(sampler2D(_SSRColorPyramidTexture, s_point_clamp_sampler), _87, 0.0);
+            _244 = _114.xyz * (1.0 / (1.0 - max(max(_114.x, _114.y), _114.z)));
+            break;
         }
-    }
-
-    float aoOut = aoSum / max(weightSum, 1e-5);
-
-    imageStore(_GTAOUpsampleAOTermRT, pix, vec4(aoOut, 0, 0, 0));
+        float _124 = floor(_107);
+        vec2 _125 = _82 * _ScreenSpaceReflectionData._SSRParams0.zw;
+        vec2 _126 = vec2(1.5) * _ScreenSpaceReflectionData._SSRParams0.zw;
+        float _127 = pow(2.0, _124);
+        vec2 _129 = _125 - (_126 * _127);
+        vec2 _130 = _ScreenSpaceReflectionData._SSRParams0.zw * _127;
+        float _132;
+        vec3 _135;
+        int _137;
+        _132 = 0.0;
+        _135 = vec3(0.0);
+        _137 = 0;
+        float _133;
+        vec3 _136;
+        for (; _137 < 4; _132 = _133, _135 = _136, _137++)
+        {
+            _136 = _135;
+            _133 = _132;
+            for (int _146 = 0; _146 < 4; )
+            {
+                vec2 _154 = _129 + (vec2(float(_137), float(_146)) * _130);
+                float _174 = _74[_137][_146] * exp(abs((1.0 / ((ShaderVariablesGlobal._ZBufferParams.z * textureLod(sampler2D(_SSRCurrentSceneDepthPyramidTexture, s_point_clamp_sampler), _154, _124).x) + ShaderVariablesGlobal._ZBufferParams.w)) - _99) * (-0.00999999977648258209228515625));
+                _136 += (textureLod(sampler2D(_SSRColorPyramidTexture, s_linear_clamp_sampler), _154, _124).xyz * _174);
+                _133 += _174;
+                _146++;
+                continue;
+            }
+        }
+        float _177 = clamp(_124 + 1.0, 0.0, _ScreenSpaceReflectionData._SSRParams5.y);
+        float _178 = pow(2.0, _177);
+        vec2 _180 = _125 - (_126 * _178);
+        vec2 _181 = _ScreenSpaceReflectionData._SSRParams0.zw * _178;
+        float _183;
+        vec3 _186;
+        int _188;
+        _183 = 0.0;
+        _186 = vec3(0.0);
+        _188 = 0;
+        float _184;
+        vec3 _187;
+        for (; _188 < 4; _183 = _184, _186 = _187, _188++)
+        {
+            _187 = _186;
+            _184 = _183;
+            for (int _197 = 0; _197 < 4; )
+            {
+                vec2 _205 = _180 + (vec2(float(_188), float(_197)) * _181);
+                float _225 = _74[_188][_197] * exp(abs((1.0 / ((ShaderVariablesGlobal._ZBufferParams.z * textureLod(sampler2D(_SSRCurrentSceneDepthPyramidTexture, s_point_clamp_sampler), _205, _177).x) + ShaderVariablesGlobal._ZBufferParams.w)) - _99) * (-0.00999999977648258209228515625));
+                _187 += (textureLod(sampler2D(_SSRColorPyramidTexture, s_linear_clamp_sampler), _205, _177).xyz * _225);
+                _184 += _225;
+                _197++;
+                continue;
+            }
+        }
+        vec3 _235 = mix(_135 / vec3(max(_132, 0.00999999977648258209228515625)), _186 / vec3(max(_183, 0.00999999977648258209228515625)), vec3(_107 - _124));
+        _244 = _235 * (1.0 / (1.0 - max(max(_235.x, _235.y), _235.z)));
+        break;
+    } while(false);
+    imageStore(_SSRColorResolveRWTexture, ivec2(gl_GlobalInvocationID.xy), _244.xyzz);
 }
 
