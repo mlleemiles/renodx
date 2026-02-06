@@ -143,22 +143,31 @@ void main()
     float m1 = 0.0;
     float m2 = 0.0;
     float currentAO = 0.0;
+	float sampleAO[9];
 
     // Unroll manually or loop
     for (int i = 0; i < 9; i++)
     {
-        float sampleAO = textureLod(sampler2D(_GTAOMainAOTermRT, s_point_clamp_sampler), uv + (vec2(kOffsets[i]) * _GTAOData._GTAOHalfScreenSize.zw), 0.0).x;
+        sampleAO[i] = textureLod(sampler2D(_GTAOMainAOTermRT, s_point_clamp_sampler), uv + (vec2(kOffsets[i]) * _GTAOData._GTAOHalfScreenSize.zw), 0.0).x;
         
-        m1 += sampleAO;
-        m2 += sampleAO * sampleAO;
+        m1 += sampleAO[i];
+        m2 += sampleAO[i] * sampleAO[i];
 
         // Store center pixel (index 4 in your array is 0,0)
-        if (i == 4) currentAO = sampleAO;
+        if (i == 4) currentAO = sampleAO[i];
     }
 
     m1 /= 9.0; // Mean
     m2 /= 9.0; 
-    float sigma = sqrt(max(m2 - m1 * m1, 0.0)); // Standard Deviation
+    float sigma = sqrt(max(m2 - m1 * m1, 0.0)) * 1.25f; // Standard Deviation
+	
+    float minCrossAO = min(sampleAO[1], min(min(sampleAO[3], sampleAO[4]), min(sampleAO[5], sampleAO[7])));
+    float minCornerAO = min(min(sampleAO[0], sampleAO[2]), min(sampleAO[6], sampleAO[8]));
+    float AOLowerThresh = min((minCrossAO + minCornerAO) * 0.5, m1 - sigma);
+	
+    float maxCrossAO = max(sampleAO[1], max(max(sampleAO[3], sampleAO[4]), max(sampleAO[5], sampleAO[7])));
+    float maxCornerAO = max(max(sampleAO[0], sampleAO[2]), max(sampleAO[6], sampleAO[8]));
+    float AOUpperThresh = max((maxCrossAO + maxCornerAO) * 0.5, m1 + sigma);
 
     // 5. Determine History Validity
     float validity = 1.0;
@@ -192,7 +201,12 @@ void main()
     } 
     else {
         // A. Clip history to the statistical variance of the new frame
-        float clippedHistory = ClipHistory(historyAO, currentAO, m1, sigma);
+        //float clippedHistory = ClipHistory(historyAO, currentAO, m1, sigma);
+		
+		float AOMidThresh = (AOUpperThresh + AOLowerThresh) * 0.5;
+		float AODiff = historyAO - AOMidThresh;
+		float AODiffNorm = abs(AODiff / ((AOUpperThresh - AOLowerThresh) * 0.5));
+		float filteredPrevAO = mix(historyAO, AOMidThresh + (AODiff / AODiffNorm), bool(AODiffNorm > 1.0));
 
         // B. Calculate blend factor
         // 0.95 = High temporal stability (less flicker, more trails)
@@ -201,7 +215,7 @@ void main()
 
         // C. Mix: Always blend a little bit of currentAO (LERP), don't just clamp history.
         // This mix ensures that even if history is "perfect", we slowly integrate new lighting data.
-        finalAO = mix(currentAO, clippedHistory, blendFactor);
+        finalAO = mix(currentAO, filteredPrevAO, blendFactor);
     }
 
     // Output
