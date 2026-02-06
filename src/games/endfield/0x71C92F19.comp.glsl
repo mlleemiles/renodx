@@ -1,3 +1,5 @@
+// AO prefilter mips
+
 #version 450
 #if defined(GL_EXT_control_flow_attributes)
 #extension GL_EXT_control_flow_attributes : require
