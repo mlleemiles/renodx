@@ -434,7 +434,7 @@ renodx::utils::settings::Settings settings = {
         .section = "Reflections",
         .tooltip = "",
         .min = 0.f,
-        .max = 2.f,
+        .max = 16.f,
         .format = "%.2f",
     },
 	new renodx::utils::settings::Setting{
