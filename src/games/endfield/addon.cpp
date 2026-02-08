@@ -32,17 +32,16 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
   std::vector<reshade::api::descriptor_table> current_descriptor_tables;
 
   reshade::api::pipeline xeGTAO_depth_filter_pipeline{0};
-  reshade::api::pipeline_subobject xeGTAO_depth_filter_pipeline_subobjects[1]{};
-  reshade::api::shader_desc xeGTAO_depth_filter_shader{};
   reshade::api::pipeline_layout xeGTAO_depth_filter_pipeline_layout{0};
-
-  reshade::api::resource_desc xeGTAO_depth_mip_tex_desc{};
   reshade::api::resource xeGTAO_depth_mip_texture;
   reshade::api::resource_view xeGTAO_depth_mip_uav[5]{};
-  reshade::api::resource_view xeGTAO_depth_mip_srv[5]{};
+  reshade::api::resource_view xeGTAO_depth_mip_srv{};
   reshade::api::descriptor_table xeGTAO_depth_mip_descriptor_table{0};
 
   void setup_xeGTAO_depth_filter(reshade::api::device* device) {
+    reshade::api::pipeline_subobject xeGTAO_depth_filter_pipeline_subobjects[1]{};
+    reshade::api::shader_desc xeGTAO_depth_filter_shader{};
+
     xeGTAO_depth_filter_shader.code = __0x71C82F19.data();
     xeGTAO_depth_filter_shader.code_size = __0x71C82F19.size();
     xeGTAO_depth_filter_pipeline_subobjects[0].type = reshade::api::pipeline_subobject_type::compute_shader;
@@ -171,6 +170,7 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
   }
 
   void create_resources(reshade::api::device* device, uint32_t width = 1, uint32_t height = 1) {
+    reshade::api::resource_desc xeGTAO_depth_mip_tex_desc{};
     xeGTAO_depth_mip_tex_desc = reshade::api::resource_desc(
         reshade::api::resource_type::texture_2d, // type
         width,                                    // width
@@ -226,17 +226,24 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
           reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_resource_view failed)");
           assert(create_resource_view_result != false);
         }
+    }
 
-        create_resource_view_result = device->create_resource_view(
-            xeGTAO_depth_mip_texture,
-            reshade::api::resource_usage::shader_resource,
-            view_desc,
-            &xeGTAO_depth_mip_srv[i]
-        );
-        if (!create_resource_view_result) {
-          reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_resource_view failed)");
-          assert(create_resource_view_result != false);
-        }
+    reshade::api::resource_view_desc view_desc = {};
+    view_desc.type = reshade::api::resource_view_type::texture_2d;
+    view_desc.format = reshade::api::format::r32_float;
+
+    view_desc.texture.first_level = 0;
+    view_desc.texture.level_count = GetMaxMipCount(width, height);
+
+    bool create_resource_view_result = device->create_resource_view(
+        xeGTAO_depth_mip_texture,
+        reshade::api::resource_usage::shader_resource,
+        view_desc,
+        &xeGTAO_depth_mip_srv
+    );
+    if (!create_resource_view_result) {
+      reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_resource_view failed)");
+      assert(create_resource_view_result != false);
     }
 
     reshade::api::descriptor_table_update update[5] = {};
@@ -259,10 +266,10 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
             device->destroy_resource_view(xeGTAO_depth_mip_uav[i]);
             xeGTAO_depth_mip_uav[i] = {};
         }
-        if (xeGTAO_depth_mip_srv[i].handle != 0) {
-            device->destroy_resource_view(xeGTAO_depth_mip_srv[i]);
-            xeGTAO_depth_mip_srv[i] = {};
-        }
+    }
+    if (xeGTAO_depth_mip_srv.handle != 0) {
+        device->destroy_resource_view(xeGTAO_depth_mip_srv);
+        xeGTAO_depth_mip_srv = {};
     }
     if (xeGTAO_depth_mip_texture.handle != 0) {
       device->destroy_resource(xeGTAO_depth_mip_texture);
@@ -348,7 +355,7 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list) {
         custom_device_data->destroy_resources(device);
         custom_device_data->create_resources(device, screen_width, screen_height);
         resource_need_recreate = false;
-    } else if (custom_device_data->xeGTAO_depth_mip_texture.handle == 0 || custom_device_data->xeGTAO_depth_mip_uav[0].handle == 0 || custom_device_data->xeGTAO_depth_mip_srv[0].handle == 0) {
+    } else if (custom_device_data->xeGTAO_depth_mip_texture.handle == 0 || custom_device_data->xeGTAO_depth_mip_uav[0].handle == 0 || custom_device_data->xeGTAO_depth_mip_srv.handle == 0) {
         reshade::log::message(reshade::log::level::info, "Resources handles are 0, creating resources");
         custom_device_data->create_resources(device, screen_width, screen_height);
     }
@@ -783,8 +790,8 @@ void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::c
     for (auto* runtime : renodx_device_data->effect_runtimes) {
         if (runtime == nullptr) continue;
 
-        if (custom_device_data->xeGTAO_depth_mip_srv[0].handle != 0) {
-            runtime->update_texture_bindings("DEPTH", custom_device_data->xeGTAO_depth_mip_srv[0], custom_device_data->xeGTAO_depth_mip_srv[0]);
+        if (custom_device_data->xeGTAO_depth_mip_srv.handle != 0) {
+            runtime->update_texture_bindings("DEPTH", custom_device_data->xeGTAO_depth_mip_srv, custom_device_data->xeGTAO_depth_mip_srv);
         }
         else
         {
