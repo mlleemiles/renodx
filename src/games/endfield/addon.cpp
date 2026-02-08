@@ -246,14 +246,10 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
         update[i].binding = i;
         update[i].array_offset = 0;
         update[i].count = 1;
+        update[i].type = reshade::api::descriptor_type::texture_unordered_access_view;
         update[i].descriptors = &xeGTAO_depth_mip_uav[i];
     }
-    if (xeGTAO_depth_mip_descriptor_table.handle != 0) {
-        device->update_descriptor_tables(5, update);
-        reshade::log::message(reshade::log::level::info, "Descriptor table 2 updated with depth mip UAVs");
-    } else {
-        reshade::log::message(reshade::log::level::error, "Descriptor table not allocated - update failed");
-    }
+    device->update_descriptor_tables(5, update);
   }
 
   void destroy_resources(reshade::api::device* device) {
@@ -348,10 +344,13 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list) {
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return true;
 
-    if (resource_need_recreate || custom_device_data->xeGTAO_depth_mip_texture.handle == 0 || custom_device_data->xeGTAO_depth_mip_uav[0].handle == 0 || custom_device_data->xeGTAO_depth_mip_srv[0].handle == 0) {
+    if (resource_need_recreate) {
         custom_device_data->destroy_resources(device);
         custom_device_data->create_resources(device, screen_width, screen_height);
         resource_need_recreate = false;
+    } else if (custom_device_data->xeGTAO_depth_mip_texture.handle == 0 || custom_device_data->xeGTAO_depth_mip_uav[0].handle == 0 || custom_device_data->xeGTAO_depth_mip_srv[0].handle == 0) {
+        reshade::log::message(reshade::log::level::info, "Resources handles are 0, creating resources");
+        custom_device_data->create_resources(device, screen_width, screen_height);
     }
 
     hasDepth = true;
@@ -360,7 +359,7 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list) {
     reshade::api::descriptor_table descriptor_table[3] = {custom_device_data->current_descriptor_tables[0], custom_device_data->current_descriptor_tables[1], custom_device_data->xeGTAO_depth_mip_descriptor_table};
     cmd_list->bind_descriptor_tables(reshade::api::shader_stage::all_compute, custom_device_data->xeGTAO_depth_filter_pipeline_layout, 0, 3, descriptor_table);
     cmd_list->barrier(custom_device_data->xeGTAO_depth_mip_texture, reshade::api::resource_usage::unordered_access | reshade::api::resource_usage::shader_resource, reshade::api::resource_usage::unordered_access);
-    cmd_list->dispatch((screen_width/2 + 7) / 8, (screen_height/2 + 7) / 8, 1);
+    cmd_list->dispatch((screen_width + 7) / 8, (screen_height + 7) / 8, 1);
 
     auto* data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(cmd_list->get_device());
     if (data == nullptr) return true;
