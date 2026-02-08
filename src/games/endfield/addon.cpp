@@ -9,7 +9,7 @@
 //#define DEBUG_LEVEL_1
 //#define DEBUG_LEVEL_2
 
-//#define RESHADE_AO
+#define RESHADE_AO
 #define REMOVE_UI
 
 #include <embed/shaders.h>
@@ -21,7 +21,7 @@
 #include "../../mods/swapchain.hpp"
 #include "../../templates/settings.hpp"
 #include "../../utils/date.hpp"
-#include "../../utils/random.hpp"
+#include "../../utils/trace.hpp"
 #include "../../utils/settings.hpp"
 #include "./shared.h"
 
@@ -29,27 +29,256 @@ namespace {
 
 #ifdef RESHADE_AO
 struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
-	reshade::api::resource_view srv_depth = { 0 };
-	reshade::api::resource_view srv_normal_worldspace = { 0 };
-	reshade::api::resource_view srv_mv = { 0 };
-  reshade::api::resource_view uav_ao = { 0 };
-  reshade::api::resource_usage uav_original_usages = (reshade::api::resource_usage::undefined);
-  reshade::api::resource uav_ao_texture = { 0 };
-  uint64_t uav_resource_handle = 0;
-	
-  reshade::api::resource_view prev_srv_depth = { 0 };
-  reshade::api::resource_view prev_srv_normal_worldspace = { 0 };
-  reshade::api::resource_view prev_srv_mv = { 0 };
-	reshade::api::resource_view prev_uav_ao = { 0 };
-#ifdef TRACE_DESC
-	std::map<std::pair<uint32_t, uint32_t>, reshade::api::resource_view> compute_uav_binds;
-	std::map<std::pair<uint32_t, uint32_t>, reshade::api::buffer_range> constants;
-#endif
+  std::vector<reshade::api::descriptor_table> current_descriptor_tables;
+
+  reshade::api::pipeline xeGTAO_depth_filter_pipeline{0};
+  reshade::api::pipeline_subobject xeGTAO_depth_filter_pipeline_subobjects[1]{};
+  reshade::api::shader_desc xeGTAO_depth_filter_shader{};
+  reshade::api::pipeline_layout xeGTAO_depth_filter_pipeline_layout{0};
+
+  reshade::api::resource_desc xeGTAO_depth_mip_tex_desc{};
+  reshade::api::resource xeGTAO_depth_mip_texture;
+  reshade::api::resource_view xeGTAO_depth_mip_uav[5]{};
+  reshade::api::resource_view xeGTAO_depth_mip_srv[5]{};
+  reshade::api::descriptor_table xeGTAO_depth_mip_descriptor_table{0};
+
+  void setup_xeGTAO_depth_filter(reshade::api::device* device) {
+    xeGTAO_depth_filter_shader.code = __0x71C82F19.data();
+    xeGTAO_depth_filter_shader.code_size = __0x71C82F19.size();
+    xeGTAO_depth_filter_pipeline_subobjects[0].type = reshade::api::pipeline_subobject_type::compute_shader;
+    xeGTAO_depth_filter_pipeline_subobjects[0].count = 1;
+    xeGTAO_depth_filter_pipeline_subobjects[0].data = &xeGTAO_depth_filter_shader;
+
+    reshade::api::pipeline_layout_param xeGTAO_depth_filter_pipeline_layout_params[3]{};
+    xeGTAO_depth_filter_pipeline_layout_params[0].type = reshade::api::pipeline_layout_param_type::descriptor_table;
+    xeGTAO_depth_filter_pipeline_layout_params[0].descriptor_table.count = 7;
+    xeGTAO_depth_filter_pipeline_layout_params[1].type = reshade::api::pipeline_layout_param_type::descriptor_table;
+    xeGTAO_depth_filter_pipeline_layout_params[1].descriptor_table.count = 2;
+    xeGTAO_depth_filter_pipeline_layout_params[2].type = reshade::api::pipeline_layout_param_type::descriptor_table;
+    xeGTAO_depth_filter_pipeline_layout_params[2].descriptor_table.count = 5;
+
+    reshade::api::descriptor_range table0_ranges[7];
+
+    for (uint32_t i = 0; i < 5; ++i) {
+        table0_ranges[i] = {
+            .binding = i,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::texture_unordered_access_view
+        };
+    }
+    table0_ranges[5] = {
+        .binding = 5,
+        .dx_register_index = 0,
+        .dx_register_space = 0,
+        .count = 1,
+        .visibility = reshade::api::shader_stage::compute,
+        .array_size = 1,
+        .type = reshade::api::descriptor_type::texture_shader_resource_view
+    };
+    table0_ranges[6] = {
+        .binding = 6,
+        .dx_register_index = 0,
+        .dx_register_space = 0,
+        .count = 1,
+        .visibility = reshade::api::shader_stage::compute,
+        .array_size = 1,
+        .type = reshade::api::descriptor_type::sampler
+    };
+
+    reshade::api::descriptor_range table1_ranges[2];
+
+    for (uint32_t i = 0; i < 2; ++i) {
+        table1_ranges[i] = {
+            .binding = i,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::constant_buffer
+        };
+    }
+
+    reshade::api::descriptor_range table2_ranges[5];
+
+    for (uint32_t i = 0; i < 5; ++i) {
+        table2_ranges[i] = {
+            .binding = i,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::texture_unordered_access_view
+        };
+    }
+
+    xeGTAO_depth_filter_pipeline_layout_params[0] =
+        reshade::api::pipeline_layout_param(7, table0_ranges);
+
+    xeGTAO_depth_filter_pipeline_layout_params[1] =
+        reshade::api::pipeline_layout_param(2, table1_ranges);
+
+    xeGTAO_depth_filter_pipeline_layout_params[2] =
+        reshade::api::pipeline_layout_param(5, table2_ranges);
+
+    bool create_pipeline_layout_result = device->create_pipeline_layout(3, xeGTAO_depth_filter_pipeline_layout_params, &xeGTAO_depth_filter_pipeline_layout);
+    if (!create_pipeline_layout_result) {
+      reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_pipeline_layout failed)");
+      assert(create_pipeline_layout_result != false);
+    }
+
+    bool create_pipeline_result = device->create_pipeline(xeGTAO_depth_filter_pipeline_layout, 1, xeGTAO_depth_filter_pipeline_subobjects, &xeGTAO_depth_filter_pipeline);
+    if (!create_pipeline_result) {
+      reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_pipeline failed)");
+      assert(create_pipeline_result != false);
+    }
+
+    bool allocate_descriptor_table_result = device->allocate_descriptor_table(xeGTAO_depth_filter_pipeline_layout, 2, &xeGTAO_depth_mip_descriptor_table);
+    if (!allocate_descriptor_table_result) {
+      reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(allocate_descriptor_table failed)");
+      assert(allocate_descriptor_table_result != false);
+    }
+    reshade::log::message(reshade::log::level::info, "Logging created layout");
+    renodx::utils::trace::internal::LogLayout(3, xeGTAO_depth_filter_pipeline_layout_params, xeGTAO_depth_filter_pipeline_layout);
+  }
+
+  void destroy_xeGTAO_depth_filter(reshade::api::device* device) {
+    if (xeGTAO_depth_filter_pipeline.handle != 0) {
+      device->destroy_pipeline(xeGTAO_depth_filter_pipeline);
+      xeGTAO_depth_filter_pipeline = {0};
+    }
+
+    if (xeGTAO_depth_mip_descriptor_table.handle != 0) {
+      device->free_descriptor_table(xeGTAO_depth_mip_descriptor_table);
+      xeGTAO_depth_mip_descriptor_table = {0};
+    }
+
+    if (xeGTAO_depth_filter_pipeline_layout.handle != 0) {
+      device->destroy_pipeline_layout(xeGTAO_depth_filter_pipeline_layout);
+      xeGTAO_depth_filter_pipeline_layout = {0};
+    }
+  }
+
+  uint32_t GetMaxMipCount(uint32_t width, uint32_t height)
+  {
+      uint32_t size = std::max(width, height);
+      return 32 - std::countl_zero(size);
+  }
+
+  void create_resources(reshade::api::device* device, uint32_t width = 1, uint32_t height = 1) {
+    xeGTAO_depth_mip_tex_desc = reshade::api::resource_desc(
+        reshade::api::resource_type::texture_2d, // type
+        width,                                    // width
+        height,                                   // height
+        1,                                        // depth_or_layers
+        GetMaxMipCount(width, height),            // mip levels
+        reshade::api::format::r32_float,         // format
+        1,                                        // samples
+        reshade::api::memory_heap::gpu_only,     // heap
+        reshade::api::resource_usage::unordered_access |
+        reshade::api::resource_usage::copy_source |
+        reshade::api::resource_usage::copy_dest |
+        reshade::api::resource_usage::shader_resource |
+        reshade::api::resource_usage::render_target, // usage
+        reshade::api::resource_flags::none
+    );
+
+    reshade::log::message(
+        reshade::log::level::debug,
+        std::format("Dimension - width:{} height:{}", static_cast<float>(width), static_cast<float>(height)).c_str());
+
+    bool create_resource_result = device->create_resource(
+        xeGTAO_depth_mip_tex_desc,
+        nullptr,
+        reshade::api::resource_usage::unordered_access |
+        reshade::api::resource_usage::copy_source |
+        reshade::api::resource_usage::copy_dest |
+        reshade::api::resource_usage::shader_resource |
+        reshade::api::resource_usage::render_target,
+        &xeGTAO_depth_mip_texture
+    );
+    if (!create_resource_result) {
+      reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_resource failed)");
+      assert(create_resource_result != false);
+    }
+
+    for (uint32_t i = 0; i < 5; ++i)
+    {
+        reshade::api::resource_view_desc view_desc = {};
+        view_desc.type = reshade::api::resource_view_type::texture_2d;
+        view_desc.format = reshade::api::format::r32_float;
+
+        view_desc.texture.first_level = i;
+        view_desc.texture.level_count = 1;
+
+        bool create_resource_view_result = device->create_resource_view(
+            xeGTAO_depth_mip_texture,
+            reshade::api::resource_usage::unordered_access,
+            view_desc,
+            &xeGTAO_depth_mip_uav[i]
+        );
+        if (!create_resource_view_result) {
+          reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_resource_view failed)");
+          assert(create_resource_view_result != false);
+        }
+
+        create_resource_view_result = device->create_resource_view(
+            xeGTAO_depth_mip_texture,
+            reshade::api::resource_usage::shader_resource,
+            view_desc,
+            &xeGTAO_depth_mip_srv[i]
+        );
+        if (!create_resource_view_result) {
+          reshade::log::message(reshade::log::level::warning, "utils::render::RenderPass(create_resource_view failed)");
+          assert(create_resource_view_result != false);
+        }
+    }
+
+    reshade::api::descriptor_table_update update[5] = {};
+    for (uint32_t i = 0; i < 5; ++i)
+    {
+        update[i].table = xeGTAO_depth_mip_descriptor_table;
+        update[i].binding = i;
+        update[i].array_offset = 0;
+        update[i].count = 1;
+        update[i].descriptors = &xeGTAO_depth_mip_uav[i];
+    }
+    if (xeGTAO_depth_mip_descriptor_table.handle != 0) {
+        device->update_descriptor_tables(5, update);
+        reshade::log::message(reshade::log::level::info, "Descriptor table 2 updated with depth mip UAVs");
+    } else {
+        reshade::log::message(reshade::log::level::error, "Descriptor table not allocated - update failed");
+    }
+  }
+
+  void destroy_resources(reshade::api::device* device) {
+    for (uint32_t i = 0; i < 5; ++i)
+    {
+        if (xeGTAO_depth_mip_uav[i].handle != 0) {
+            device->destroy_resource_view(xeGTAO_depth_mip_uav[i]);
+            xeGTAO_depth_mip_uav[i] = {};
+        }
+        if (xeGTAO_depth_mip_srv[i].handle != 0) {
+            device->destroy_resource_view(xeGTAO_depth_mip_srv[i]);
+            xeGTAO_depth_mip_srv[i] = {};
+        }
+    }
+    if (xeGTAO_depth_mip_texture.handle != 0) {
+      device->destroy_resource(xeGTAO_depth_mip_texture);
+      xeGTAO_depth_mip_texture = {};
+    }
+  }
 };
 #endif
 
 int16_t screen_width = 0;
 int16_t screen_height = 0;
+bool resource_need_recreate = false;
 
 #ifdef REMOVE_UI
 bool isPingInputCandidate = false;
@@ -98,12 +327,7 @@ bool OnPingDraw(reshade::api::command_list* cmd_list) {
     isPingInputCandidate = (drawParams.index_count == PING_INDEX_COUNT) && 
 							   (drawParams.first_index == PING_FIRST_INDEX) && 
 							   (drawParams.vertex_offset == PING_VERTEX_OFFSET);
-    /*
-    if (shader_injection.ui_aspect_ratio != ui_aspect)
-    {
-        shader_injection.ui_aspect_ratio = ui_aspect;
-    }
-    */
+
     shader_injection.ui_disable_flag = isPingInputCandidate && (use_ping == 0.0f) ? 1.0f : 0.0f;
     return true;
 	
@@ -119,92 +343,43 @@ bool OnUIDDraw(reshade::api::command_list* cmd_list) {
 #endif
 
 #ifdef RESHADE_AO
-bool OnNormalDepthBlit(reshade::api::command_list* cmd_list) {
-    auto* cmd_list_data = renodx::utils::data::Get<renodx::utils::swapchain::CommandListData>(cmd_list);
-    if (cmd_list_data == nullptr) return true;
-    if (cmd_list_data->current_render_targets.empty()) return true;
-
-    auto rtv0 = cmd_list_data->current_render_targets[0];
-    if (rtv0.handle == 0) return true;
-
+bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list) {
     auto* device = cmd_list->get_device();
-	/*
-    auto* renodx_device_data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(device);
-    if (renodx_device_data == nullptr) return true;
-    const std::shared_lock lock(renodx_device_data->mutex);
-  */
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return true;
 
-	
-    reshade::api::resource_view_desc current_rtv_desc = device->get_resource_view_desc(rtv0);
-	
-	if (current_rtv_desc.format == reshade::api::format::r32_float) {
-		custom_device_data->srv_depth = rtv0;
+    if (resource_need_recreate || custom_device_data->xeGTAO_depth_mip_texture.handle == 0 || custom_device_data->xeGTAO_depth_mip_uav[0].handle == 0 || custom_device_data->xeGTAO_depth_mip_srv[0].handle == 0) {
+        custom_device_data->destroy_resources(device);
+        custom_device_data->create_resources(device, screen_width, screen_height);
+        resource_need_recreate = false;
+    }
+
     hasDepth = true;
-	}
-	else if (current_rtv_desc.format == reshade::api::format::r10g10b10a2_unorm ) {
-		custom_device_data->srv_normal_worldspace = rtv0;
-    hasNormal = true;
-    startGbufferCapture = true;
-	}
 
-    return true;
-}
-
-bool OnMotionBlit(reshade::api::command_list* cmd_list) {
-    auto* cmd_list_data = renodx::utils::data::Get<renodx::utils::swapchain::CommandListData>(cmd_list);
-    if (cmd_list_data == nullptr) return true;
-    if (cmd_list_data->current_render_targets.empty()) return true;
-
-    auto rtv0 = cmd_list_data->current_render_targets[2];
-    if (rtv0.handle == 0) return true;
-
-    auto* device = cmd_list->get_device();
-	/*
-    auto* renodx_device_data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(device);
-    if (renodx_device_data == nullptr) return true;
-    const std::shared_lock lock(renodx_device_data->mutex);
-
-    reshade::api::resource_view_desc current_rtv_desc = device->get_resource_view_desc(rtv0);
-  */
-
-
-    auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
-    if (custom_device_data == nullptr) return true;
-
-	  custom_device_data->srv_mv = rtv0;
-    hasMV = true;
-
-    return true;
-}
-
-bool OnDenoiserFinish(reshade::api::command_list* cmd_list) {
-    hasDenoised = true;
-    hasAO = true;
-    return true;
-}
-
-bool OnUpsampleFinish(reshade::api::command_list* cmd_list) {
-    auto* cmd_list_data = renodx::utils::data::Get<renodx::utils::swapchain::CommandListData>(cmd_list);
-    if (cmd_list_data == nullptr) return true;
-
-    auto* device = cmd_list->get_device();
-
-    auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
-    if (custom_device_data == nullptr) return true;
-    if (custom_device_data->uav_ao.handle == 0) return true;
+    cmd_list->bind_pipeline(reshade::api::pipeline_stage::all_compute, custom_device_data->xeGTAO_depth_filter_pipeline);
+    reshade::api::descriptor_table descriptor_table[3] = {custom_device_data->current_descriptor_tables[0], custom_device_data->current_descriptor_tables[1], custom_device_data->xeGTAO_depth_mip_descriptor_table};
+    cmd_list->bind_descriptor_tables(reshade::api::shader_stage::all_compute, custom_device_data->xeGTAO_depth_filter_pipeline_layout, 0, 3, descriptor_table);
+    cmd_list->barrier(custom_device_data->xeGTAO_depth_mip_texture, reshade::api::resource_usage::unordered_access | reshade::api::resource_usage::shader_resource, reshade::api::resource_usage::unordered_access);
+    cmd_list->dispatch((screen_width/2 + 7) / 8, (screen_height/2 + 7) / 8, 1);
 
     auto* data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(cmd_list->get_device());
     if (data == nullptr) return true;
     const std::shared_lock lock(data->mutex);
-    cmd_list->barrier(custom_device_data->uav_ao_texture, custom_device_data->uav_original_usages, reshade::api::resource_usage::render_target);
-    hasReshadeDrawn = true;
+    cmd_list->barrier(custom_device_data->xeGTAO_depth_mip_texture, reshade::api::resource_usage::unordered_access, reshade::api::resource_usage::shader_resource);
     for (auto* runtime : data->effect_runtimes) {
       runtime->set_effects_state(true);
-      runtime->render_effects(cmd_list, custom_device_data->uav_ao, custom_device_data->uav_ao);
+      runtime->render_effects(cmd_list, custom_device_data->xeGTAO_depth_mip_uav[0], custom_device_data->xeGTAO_depth_mip_uav[0]);
     }
-    cmd_list->barrier(custom_device_data->uav_ao_texture, reshade::api::resource_usage::render_target, custom_device_data->uav_original_usages);
+    cmd_list->barrier(custom_device_data->xeGTAO_depth_mip_texture, reshade::api::resource_usage::shader_resource, reshade::api::resource_usage::unordered_access);
+/*
+    char buffer[256];
+    sprintf(buffer,
+        "Pipeline: %llu, Table2: %llu",
+        custom_device_data->xeGTAO_depth_filter_pipeline.handle,
+        custom_device_data->xeGTAO_depth_mip_descriptor_table.handle);
+
+    reshade::log::message(reshade::log::level::info, buffer);
+*/
     return false;
 }
 #endif
@@ -225,41 +400,14 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 		 },
 	},
 #endif
-
 #ifdef RESHADE_AO
-	{0x47FB91F9, {
-			 .crc32 = 0x47FB91F9,
-			 .on_draw = &OnNormalDepthBlit,
-		 },
-	},
-  /*
-	{0xC14B0925, {
-			 .crc32 = 0xC14B0925,
-			 .on_draw = &OnMotionBlit,
-		 },
-	},
-  */
-	{0x3F1D52C5, {
-			 .crc32 = 0x3F1D52C5,
-       .code = __0x3F1D52C5,
-			 .on_drawn = &OnDenoiserFinish,
-		 },
-	},
-	{0x21E2F7BD, {
-			 .crc32 = 0x21E2F7BD,
-       .code = __0x21E2F7BD,
-			 .on_drawn = &OnUpsampleFinish,
+	{0x71C92F19, {
+			 .crc32 = 0x71C92F19,
+			 .code = __0x71C92F19,
+			 .on_draw = &OnGTAODepthFilterDispatch,
 		 },
 	},
 #endif
-/*
-	{0x21E2F7BD, {
-			 .crc32 = 0x21E2F7BD,
-			 .code = __0x21E2F7BD,
-			 .on_dispatch = &OnAOUpsampling,
-		 },
-	},
-*/
 	__ALL_CUSTOM_SHADERS,
 };
 
@@ -507,12 +655,13 @@ void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
 	auto bb = device->get_resource_desc(swapchain->get_current_back_buffer());
 	if (bb.type == reshade::api::resource_type::unknown) return;
     
+    if (bb.texture.width != screen_width || bb.texture.height != screen_height) {
+        resource_need_recreate = true;
+    }
+
+    screen_width = bb.texture.width;
+    screen_height = bb.texture.height;
     shader_injection.ui_aspect_ratio = static_cast<float>(bb.texture.height) / static_cast<float>(bb.texture.width);
-    /*
-    reshade::log::message(
-        reshade::log::level::debug,
-        std::format("Swapchain - width:{} height:{} ratio:{}", static_cast<float>(bb.texture.width), static_cast<float>(bb.texture.height), ui_aspect).c_str());*/
-  
     for (auto& target : data->swap_chain_upgrade_targets) {
         target.dimensions = {
             static_cast<int16_t>(bb.texture.width / 2),
@@ -571,10 +720,43 @@ void OnPresent(
 #ifdef RESHADE_AO
 void OnInitDevice(reshade::api::device* device) {
 	renodx::utils::data::Create<DeviceData>(device);
+  auto* data = renodx::utils::data::Get<DeviceData>(device);
+  if (data) {
+      data->current_descriptor_tables.clear();
+      data->setup_xeGTAO_depth_filter(device);
+  }
 }
 
 void OnDestroyDevice(reshade::api::device* device) {
-    renodx::utils::data::Delete<DeviceData>(device);
+  auto* data = renodx::utils::data::Get<DeviceData>(device);
+  if (data) {
+      data->destroy_xeGTAO_depth_filter(device);
+      data->destroy_resources(device);
+      data->current_descriptor_tables.clear();
+  }
+  renodx::utils::data::Delete<DeviceData>(device);
+}
+
+void OnBindDescriptorTables(
+    reshade::api::command_list* cmd_list,
+    reshade::api::shader_stage stages,
+    reshade::api::pipeline_layout layout,
+    uint32_t first,
+    uint32_t count,
+    const reshade::api::descriptor_table* tables) {
+
+    auto* device = cmd_list->get_device();
+    auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
+    if (custom_device_data == nullptr) return;
+
+    // Resize if needed
+    if (custom_device_data->current_descriptor_tables.size() < first + count) {
+        custom_device_data->current_descriptor_tables.resize(first + count);
+    }
+    // Copy the descriptor tables
+    for (uint32_t i = 0; i < count; ++i) {
+        custom_device_data->current_descriptor_tables[first + i] = tables[i];
+    }
 }
 
 void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::command_list *cmd_list, reshade::api::resource_view rtv, reshade::api::resource_view rtv_srgb) {
@@ -587,469 +769,34 @@ void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::c
     auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
     if (custom_device_data == nullptr) return;
 
-    // somehow this works now
-    // resets all the views if not present this frame
-    if (!hasAO)
-    {
-        custom_device_data->uav_ao = { 0 };
-        custom_device_data->uav_original_usages = (reshade::api::resource_usage::undefined);
-        custom_device_data->uav_resource_handle = 0;
-    }
+    if (!hasDepth) {
+        for (auto* runtime : renodx_device_data->effect_runtimes) {
+            if (runtime == nullptr) continue;
 
-    if (!hasDepth)
-    {
-        custom_device_data->srv_depth = { 0 };
-    }
-
-    if (!hasNormal)
-    {
-        custom_device_data->srv_normal_worldspace = { 0 };
-    }
-
-    if (!hasMV)
-    {
-        custom_device_data->srv_mv = { 0 };
-    }
-
-    if (!hasReshadeDrawn) {
-      runtime->set_effects_state(false);
+            reshade::api::resource_view empty_view = {0u};
+            runtime->update_texture_bindings("DEPTH", empty_view, empty_view);
+            reshade::log::message(reshade::log::level::info, "uav handle is 0, binding empty view");
+        }
+        runtime->set_effects_state(false);
+        return;
     }
 
     for (auto* runtime : renodx_device_data->effect_runtimes) {
         if (runtime == nullptr) continue;
 
-        if (custom_device_data->srv_depth.handle != 0) {
-          if (custom_device_data->srv_depth.handle != custom_device_data->prev_srv_depth.handle) {
-              runtime->update_texture_bindings("DEPTH", custom_device_data->srv_depth, custom_device_data->srv_depth);
-              custom_device_data->prev_srv_depth = custom_device_data->srv_depth;
-          }
+        if (custom_device_data->xeGTAO_depth_mip_srv[0].handle != 0) {
+            runtime->update_texture_bindings("DEPTH", custom_device_data->xeGTAO_depth_mip_srv[0], custom_device_data->xeGTAO_depth_mip_srv[0]);
         }
         else
         {
           reshade::api::resource_view empty_view = {0u};
           runtime->update_texture_bindings("DEPTH", empty_view, empty_view);
+          reshade::log::message(reshade::log::level::info, "uav handle is 0, binding empty view");
         }
-
-        if (custom_device_data->srv_normal_worldspace.handle != 0) {
-          if (custom_device_data->srv_normal_worldspace.handle != custom_device_data->prev_srv_normal_worldspace.handle) {
-              runtime->update_texture_bindings("NORMAL_WS", custom_device_data->srv_normal_worldspace, custom_device_data->srv_normal_worldspace);
-              custom_device_data->prev_srv_normal_worldspace = custom_device_data->srv_normal_worldspace;
-          }
-        }
-        else
-        {
-          reshade::api::resource_view empty_view = {0u};
-          runtime->update_texture_bindings("NORMAL_WS", empty_view, empty_view);
-        }
-
-        if (custom_device_data->srv_mv.handle != 0) {
-          if (custom_device_data->srv_mv.handle != custom_device_data->prev_srv_mv.handle) {
-              runtime->update_texture_bindings("MOTION_VECTOR", custom_device_data->srv_mv, custom_device_data->srv_mv);
-              custom_device_data->prev_srv_mv = custom_device_data->srv_mv;
-          }
-        }
-        else
-        {
-          reshade::api::resource_view empty_view = {0u};
-          runtime->update_texture_bindings("MOTION_VECTOR", empty_view, empty_view);
-        }
-
-        if (custom_device_data->uav_ao.handle != 0) {
-          if (custom_device_data->uav_ao.handle != custom_device_data->prev_uav_ao.handle) {
-            runtime->update_texture_bindings("FINAL_AO", custom_device_data->uav_ao, custom_device_data->uav_ao);
-            custom_device_data->prev_uav_ao = custom_device_data->uav_ao;
-          }
-        }
-        else
-        {
-          reshade::api::resource_view empty_view = {0u};
-          runtime->update_texture_bindings("FINAL_AO", empty_view, empty_view);
-        }
-		
     }
-    hasAO = false;
+
     hasDepth = false;
-    hasNormal = false;
-    hasMV = false;
 }
-
-std::vector<reshade::api::resource_view> GetResourceViewsFromResource(const reshade::api::resource& target_resource, const reshade::api::device* device) {
-    std::vector<reshade::api::resource_view> result_views;
-    auto* resource_data = renodx::utils::data::Get<renodx::utils::resource::DeviceData>(device);
-    if (resource_data == nullptr) return result_views;
-    
-    if (target_resource.handle == 0u) {
-        return result_views;
-    }
-    
-    renodx::utils::resource::ResourceInfo* target_resource_info = renodx::utils::resource::GetResourceInfo(target_resource, false);
-    if (target_resource_info == nullptr || target_resource_info->destroyed) {
-        //log::w("utils::resource::GetResourceViewsFromResource(Invalid or destroyed resource: ", log::AsPtr(target_resource.handle), ")");
-        return result_views;
-    }
-    
-    resource_data->store->resource_view_infos.for_each([&](const std::pair<const uint64_t, renodx::utils::resource::ResourceViewInfo>& pair) {
-        const renodx::utils::resource::ResourceViewInfo& view_info = pair.second;
-        
-        if (!view_info.destroyed && 
-            view_info.original_resource.handle == target_resource.handle && 
-            view_info.resource_info == target_resource_info) {
-            result_views.push_back(view_info.view);
-        }
-    });
-    
-    return result_views;
-}
-
-void OnBeginRenderPass(
-    reshade::api::command_list* cmd_list,
-    uint32_t count, const reshade::api::render_pass_render_target_desc* rts,
-    const reshade::api::render_pass_depth_stencil_desc* ds) {
-      if (!startGbufferCapture) return;
-      startGbufferCapture = false;
-      auto* device = cmd_list->get_device();
-      auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
-      if (custom_device_data == nullptr) return;
-
-      for (uint32_t i = 0; i < count; i++) {
-        // 0 - emissive
-        // 1 - mv
-        // 2 - rough ao translucency
-        // 3 - normal worldspace
-        // 4 - albedo
-          if (i == 1)
-          {
-            custom_device_data->srv_mv = rts[i].view;
-            hasMV = true;
-          }
-      }
-
-}
-
-void OnBarrier(
-    reshade::api::command_list* cmd_list,
-    uint32_t count,
-    const reshade::api::resource* resources,
-    const reshade::api::resource_usage* old_states,
-    const reshade::api::resource_usage* new_states) {
-
-    auto* device = cmd_list->get_device();
-    auto* custom_device_data = renodx::utils::data::Get<DeviceData>(device);
-    if (custom_device_data == nullptr)
-    {
-        custom_device_data->uav_ao = { 0 };
-        custom_device_data->uav_original_usages = (reshade::api::resource_usage::undefined);
-        custom_device_data->uav_resource_handle = 0;
-        return;
-    }
-
-    if (hasDenoised) {
-        if (custom_device_data == nullptr) return;
-        if (count > 2) return;
-
-        //auto all_views = GetResourceViewsFromResource(resources[1], device);
-        //if (!all_views.empty()) {
-            //custom_device_data->uav_ao = all_views[0];
-//#define DEBUG_AO_RESOURCE
-
-        uint32_t full_res_index = 0;
-        auto current_uav_desc = device->get_resource_desc(resources[0]);
-        uint32_t index_0_width = static_cast<unsigned int>(current_uav_desc.texture.width);
-        current_uav_desc = device->get_resource_desc(resources[1]);
-        if (index_0_width > static_cast<unsigned int>(current_uav_desc.texture.width)) {
-            full_res_index = 0;
-        }
-        else {
-            full_res_index = 1;
-        }
-
-#ifdef DEBUG_AO_RESOURCE
-        reshade::log::message(
-            reshade::log::level::debug,
-            std::format("Found GTAO UAV at index {} - widht:{} height:{}", full_res_index, static_cast<unsigned int>(current_uav_desc.texture.width), static_cast<unsigned int>(current_uav_desc.texture.height)).c_str());
-#endif 
-        custom_device_data->uav_original_usages = new_states[full_res_index];
-        custom_device_data->uav_ao_texture = resources[full_res_index];
-        if (resources[full_res_index].handle != custom_device_data->uav_resource_handle) {
-            custom_device_data->uav_resource_handle = resources[full_res_index].handle;
-            auto all_views = GetResourceViewsFromResource(resources[full_res_index], device);
-            if (!all_views.empty()) {
-                custom_device_data->uav_ao = all_views[0];
-            }
-        }
-
-        //return all_views[0];
-
-    hasDenoised = false;
-    return;
-  }
-
-    //device->create_resource_view()
-    /*
-    for (uint32_t i = 0; i < count; i++) {
-      
-      std::stringstream s;
-      s << "on_barrier(" << PRINT_PTR(resources[i].handle);
-      s << ", " << std::hex << static_cast<uint32_t>(old_states[i]) << std::dec << " (" << old_states[i] << ")";
-      s << " => " << std::hex << static_cast<uint32_t>(new_states[i]) << std::dec << " (" << new_states[i] << ")";
-      s << ") [" << i << "]";
-      reshade::log::message(reshade::log::level::info, s.str().c_str());
-      
-    }
-    */
-
-
-  // need better way to reset them but idk
-
-
-  return;
-
-}
-#ifdef TRACE_DESC
-void OnInitCommandList(reshade::api::command_list* cmd_list) {
-  renodx::utils::data::Create<DeviceData>(cmd_list);
-}
-
-void OnDestroyCommandList(reshade::api::command_list* cmd_list) {
-  renodx::utils::data::Delete<DeviceData>(cmd_list);
-}
-
-void OnResetCommandList(reshade::api::command_list* cmd_list) {
-  auto* data = renodx::utils::data::Get<DeviceData>(cmd_list);
-  if (data == nullptr) return;
-  renodx::utils::data::Delete<DeviceData>(cmd_list);
-  renodx::utils::data::Create<DeviceData>(cmd_list);
-}
-
-bool OnDispatchTest(
-    reshade::api::command_list* cmd_list,
-    uint32_t group_count_x,
-    uint32_t group_count_y,
-    uint32_t group_count_z) {
-
-if (hasDenoised) {
-  auto* shader_state = renodx::utils::shader::GetCurrentState(cmd_list);
-
-  auto* compute_state = renodx::utils::shader::GetCurrentComputeState(shader_state);
-
-  auto compute_shader_hash = renodx::utils::shader::GetCurrentComputeShaderHash(compute_state);
-  if (compute_shader_hash == 0u) return false;
-  if (compute_shader_hash != 0x21E2F7BD) return false;
-  
-  auto* cmd_list_data = renodx::utils::data::Get<DeviceData>(cmd_list);
-
-  auto compute_uav_binds = cmd_list_data->compute_uav_binds;
-
-  auto* device = cmd_list->get_device();
-
-  if (shader_state->last_pipeline != 0u) {
-    auto* pipeline_shader_details = renodx::utils::shader::GetPipelineShaderDetails(shader_state->last_pipeline);
-	/*
-	reshade::log::message(
-					  reshade::log::level::debug,
-					  std::format("Found pipeline_shader_details: 0x{:08x}", compute_shader_hash).c_str());*/
-					  
-    if (pipeline_shader_details != nullptr) {
-      auto* layout_data = renodx::utils::pipeline_layout::GetPipelineLayoutData(pipeline_shader_details->layout);
-      if (layout_data != nullptr) {
-        const auto& info = *layout_data;
-        auto param_count = info.params.size();
-        auto* descriptor_data = renodx::utils::data::Get<renodx::utils::descriptor::DeviceData>(device);
-        if (descriptor_data == nullptr) return false;
-		/*
-		reshade::log::message(
-					  reshade::log::level::debug,
-					  std::format("Found descriptor_data: 0x{:08x} {}", compute_shader_hash, param_count).c_str());*/
-
-        for (auto param_index = 0; param_index < param_count; ++param_index) {
-          const auto& param = info.params.at(param_index);
-          const auto& table = info.tables[param_index];
-		  /*
-		  reshade::log::message(
-					  reshade::log::level::debug,
-					  std::format("Found descriptor_table_type: 0x{:08x} {}", compute_shader_hash, static_cast<unsigned int>(param.type)).c_str());*/
-
-          uint32_t descriptor_table_count;
-          const reshade::api::descriptor_range* descriptor_table_ranges;
-          switch (param.type) {
-            case reshade::api::pipeline_layout_param_type::descriptor_table:
-              if (table.handle == 0u) 
-			  {
-				  reshade::log::message(
-							  reshade::log::level::debug,
-							  std::format("Can't get table handle: 0x{:08x}", compute_shader_hash).c_str());
-				  continue;
-			  }
-              descriptor_table_count = param.descriptor_table.count;
-              descriptor_table_ranges = param.descriptor_table.ranges;
-              break;
-            case reshade::api::pipeline_layout_param_type::descriptor_table_with_static_samplers:
-              if (table.handle == 0u) continue;
-              descriptor_table_count = param.descriptor_table_with_static_samplers.count;
-              descriptor_table_ranges = param.descriptor_table_with_static_samplers.ranges;
-              break;
-
-            case reshade::api::pipeline_layout_param_type::push_constants:
-            case reshade::api::pipeline_layout_param_type::push_descriptors:
-            case reshade::api::pipeline_layout_param_type::push_descriptors_with_ranges:
-            case reshade::api::pipeline_layout_param_type::push_descriptors_with_static_samplers:
-              continue;
-          }
-		  
-		  reshade::log::message(
-					  reshade::log::level::debug,
-					  std::format("Found descriptor_table: 0x{:08x} {}", compute_shader_hash, descriptor_table_count).c_str());
-
-          for (uint32_t j = 0; j < descriptor_table_count; ++j) {
-            const auto& range = descriptor_table_ranges[j];
-
-            // Skip unbounded ranges
-            if (range.count == UINT32_MAX) continue;
-
-            switch (range.type) {
-              case reshade::api::descriptor_type::shader_resource_view:
-              case reshade::api::descriptor_type::sampler_with_resource_view:
-              case reshade::api::descriptor_type::buffer_shader_resource_view:
-              case reshade::api::descriptor_type::unordered_access_view:
-                break;
-              default:
-                continue;
-            }
-
-            if (!renodx::utils::bitwise::HasFlag(range.visibility, reshade::api::shader_stage::compute)) {
-              continue;
-            }
-            // if (!renodx::utils::bitwise::HasFlag(range.visibility, reshade::api::shader_stage::pixel)) {
-            //   continue;
-            // }
-
-            uint32_t base_offset = 0;
-            reshade::api::descriptor_heap heap = {0};
-            device->get_descriptor_heap_offset(table, range.binding, 0, &heap, &base_offset);
-            //const std::shared_lock descriptor_lock(descriptor_data->mutex);
-
-		  reshade::log::message(
-					  reshade::log::level::debug,
-					  std::format("Found descriptor_heap: 0x{:08x} {}", compute_shader_hash, static_cast<unsigned int>(base_offset)).c_str());
-
-            for (uint32_t k = 0; k < range.count; ++k) {
-              auto heap_pair = descriptor_data->heaps.find(heap.handle);
-              if (heap_pair == descriptor_data->heaps.end()) {
-                // Unknown heap?
-
-              reshade::log::message(
-                    reshade::log::level::debug,
-                    std::format("Unknown heap: 0x{:08x}", compute_shader_hash).c_str());
-                continue;
-              }
-              const auto& heap_data = heap_pair->second;
-              auto offset = base_offset + k;
-              if (offset >= heap_data.size()) {
-                // Invalid location (may be oversized bind)
-              reshade::log::message(
-                    reshade::log::level::debug,
-                    std::format("Invalid heap: 0x{:08x}", compute_shader_hash).c_str());
-                continue;
-              }
-              auto known_pair = descriptor_data->resource_view_heap_locations.find(heap.handle);
-              if (known_pair == descriptor_data->resource_view_heap_locations.end()) continue;
-
-              reshade::log::message(
-                    reshade::log::level::debug,
-                    std::format("Found descriptor data: 0x{:08x}", compute_shader_hash).c_str());
-
-              auto& known = known_pair->second;
-              if (!known.contains(offset)) {
-                // Unknown Resource View
-                continue;
-              }
-
-              const auto& [descriptor_type, descriptor_data] = heap_data[offset];
-              reshade::api::resource_view resource_view = {0};
-
-              reshade::log::message(
-                    reshade::log::level::debug,
-                    std::format("Found descriptor_table_type: 0x{:08x} {}", compute_shader_hash, static_cast<unsigned int>(descriptor_type)).c_str());
-
-              bool is_uav = false;
-              switch (descriptor_type) {
-                case reshade::api::descriptor_type::texture_unordered_access_view:
-                  is_uav = true;
-                  resource_view = std::get<reshade::api::resource_view>(descriptor_data);
-
-                  reshade::log::message(
-                              reshade::log::level::debug,
-                              std::format("Found uav: 0x{:08x}", compute_shader_hash).c_str());
-                  break;
-                default:
-                  break;
-              }
-
-              auto slot = std::pair<uint32_t, uint32_t>(range.dx_register_index + k, range.dx_register_space);
-
-              if (is_uav || range.type == reshade::api::descriptor_type::unordered_access_view) {
-                if (resource_view.handle == 0u) {
-                  compute_uav_binds.erase(slot);
-                } else {
-                  auto* resource_view_info = renodx::utils::resource::GetResourceViewInfo(resource_view);
-                  if (resource_view_info->resource_info == nullptr && renodx::utils::resource::IsResourceViewEmpty(device, resource_view)) {
-                    compute_uav_binds.erase(slot);
-                  } else {
-                    compute_uav_binds[slot] = resource_view;
-                  }
-                }
-              } else {
-                // if (resource_view.handle == 0u) {
-                //   draw_details.srv_binds.erase(slot);
-                // } else {
-                //   auto detail_item = GetResourceViewDetails(resource_view, device);
-                //   if (detail_item.resource.handle == 0u && renodx::utils::resource::IsResourceViewEmpty(device, resource_view)) {
-                //     draw_details.srv_binds.erase(slot);
-                //   } else {
-                //     draw_details.srv_binds[slot] = detail_item;
-                //   }
-                // }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  hasDenoised = false;
-}
-
-  return false;
-}
-
-void OnBindDescriptorTables(
-    reshade::api::command_list* cmd_list,
-    reshade::api::shader_stage stages,
-    reshade::api::pipeline_layout layout,
-    uint32_t first,
-    uint32_t count,
-    const reshade::api::descriptor_table* tables) {
-
-      if (hasDenoised) {
-        auto* device = cmd_list->get_device();
-        auto* layout_data = renodx::utils::pipeline_layout::GetPipelineLayoutData(layout);
-
-        assert(layout_data != nullptr);
-
-        auto& info = *layout_data;
-        for (uint32_t i = 0; i < count; ++i) {
-          const auto layout_index = first + i;
-
-          assert(layout_index < info.params.size());
-          const auto& param = info.params.at(layout_index);
-          assert(param.type == reshade::api::pipeline_layout_param_type::descriptor_table
-                || param.type == reshade::api::pipeline_layout_param_type::descriptor_table_with_static_samplers);
-
-          info.tables[layout_index] = tables[i];
-        }
-      }
-}
-#endif
 #endif
 
 bool initialized = false;
@@ -1125,18 +872,9 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 #ifdef RESHADE_AO
       reshade::register_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::register_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
-	  reshade::register_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
-    reshade::register_event<reshade::addon_event::begin_render_pass>(OnBeginRenderPass);
-    reshade::register_event<reshade::addon_event::barrier>(OnBarrier);
-
-#ifdef TRACE_DESC
-	    reshade::register_event<reshade::addon_event::dispatch>(OnDispatchTest);
       reshade::register_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
-      reshade::register_event<reshade::addon_event::init_command_list>(OnInitCommandList);
-      reshade::register_event<reshade::addon_event::reset_command_list>(OnResetCommandList);
-      reshade::register_event<reshade::addon_event::destroy_command_list>(OnDestroyCommandList);
+      reshade::register_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
 
-#endif
 #endif
       if (!initialized) {
         // renodx::utils::random::binds.push_back(&shader_injection.swap_chain_output_dither_seed);
@@ -1154,18 +892,10 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 #ifdef RESHADE_AO
       reshade::unregister_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::unregister_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
-	  reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
-    reshade::unregister_event<reshade::addon_event::begin_render_pass>(OnBeginRenderPass);
-    reshade::unregister_event<reshade::addon_event::barrier>(OnBarrier);
-
-#ifdef TRACE_DESC
-      reshade::unregister_event<reshade::addon_event::dispatch>(OnDispatchTest);
     reshade::unregister_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
-      reshade::unregister_event<reshade::addon_event::init_command_list>(OnInitCommandList);
-      reshade::unregister_event<reshade::addon_event::reset_command_list>(OnResetCommandList);
-      reshade::unregister_event<reshade::addon_event::destroy_command_list>(OnDestroyCommandList);
-      reshade::unregister_event<reshade::addon_event::bind_descriptor_tables>(OnBindDescriptorTables);
-#endif
+    reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(OnBeginRenderEffects);
+
+
 #endif      
 	
       reshade::unregister_addon(h_module);
