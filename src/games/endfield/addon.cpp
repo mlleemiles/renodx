@@ -119,13 +119,13 @@ namespace PipelineHelpers
 struct XeGTAODepthFilter
 {
     ComputePipeline pipeline;
-    TextureWithViews texture_views;
+    TextureWithViews working_depth;
 
     void setup(reshade::api::device* device)
     {
         reshade::api::shader_desc shader{};
-        shader.code = __0x71C82F19.data();
-        shader.code_size = __0x71C82F19.size();
+        shader.code = __XeGTAO_PrefilterDepths.data();
+        shader.code_size = __XeGTAO_PrefilterDepths.size();
 
         reshade::api::pipeline_layout_param params[3]{};
 
@@ -202,6 +202,9 @@ struct XeGTAODepthFilter
         bool ok = PipelineHelpers::create_compute_pipeline(
             device, shader, params, 3, pipeline);
 
+        reshade::log::message(reshade::log::level::info, "Logging working depth created layout");
+        renodx::utils::trace::internal::LogLayout(3, params, pipeline.layout);
+
         assert(ok);
 
         device->allocate_descriptor_table(
@@ -232,9 +235,9 @@ struct XeGTAODepthFilter
             reshade::api::resource_usage::render_target,
             reshade::api::resource_flags::none);
 
-        device->create_resource(desc, nullptr, desc.usage, &texture_views.texture);
+        device->create_resource(desc, nullptr, desc.usage, &working_depth.texture);
 
-        texture_views.uavs.resize(5);
+        working_depth.uavs.resize(5);
 
         for (uint32_t i = 0; i < 5; ++i)
         {
@@ -245,13 +248,13 @@ struct XeGTAODepthFilter
             view.texture.level_count = 1;
 
             device->create_resource_view(
-                texture_views.texture,
+                working_depth.texture,
                 reshade::api::resource_usage::unordered_access,
                 view,
-                &texture_views.uavs[i]);
+                &working_depth.uavs[i]);
         }
 
-        texture_views.srvs.resize(1);
+        working_depth.srvs.resize(1);
 
         for (uint32_t i = 0; i < 1; ++i)
         {
@@ -262,13 +265,13 @@ struct XeGTAODepthFilter
             view.texture.level_count = mipCount;
 
             device->create_resource_view(
-                texture_views.texture,
+                working_depth.texture,
                 reshade::api::resource_usage::shader_resource,
                 view,
-                &texture_views.srvs[i]);
+                &working_depth.srvs[i]);
         }
 
-        std::vector<reshade::api::descriptor_table_update> updates(5);
+        reshade::api::descriptor_table_update updates[5]{};
 
         for (uint32_t i = 0; i < 5; ++i)
         {
@@ -277,17 +280,206 @@ struct XeGTAODepthFilter
             updates[i].array_offset = 0;
             updates[i].count = 1;
             updates[i].type = reshade::api::descriptor_type::texture_unordered_access_view;
-            updates[i].descriptors = &texture_views.uavs[i];
+            updates[i].descriptors = &working_depth.uavs[i];
         }
 
-        device->update_descriptor_tables(
-            static_cast<uint32_t>(updates.size()),
-            updates.data());
+        device->update_descriptor_tables(5, updates);
     }
 
     void destroy(reshade::api::device* device)
     {
-        texture_views.destroy(device);
+        working_depth.destroy(device);
+        pipeline.destroy(device);
+    }
+};
+
+struct XeGTAOMainPass
+{
+    ComputePipeline pipeline;
+    TextureWithViews working_ao;
+
+    void setup(reshade::api::device* device)
+    {
+        reshade::api::shader_desc shader{};
+        shader.code = __XeGTAO_MainPass.data();
+        shader.code_size = __XeGTAO_MainPass.size();
+
+        reshade::api::pipeline_layout_param params[3]{};
+
+        // Table 0
+        reshade::api::descriptor_range table0[4]{};
+
+        table0[0] = {
+            .binding = 0,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::texture_unordered_access_view
+        };
+
+        for (uint32_t i = 1; i < 3; ++i)
+        {
+          table0[i] = {
+              .binding = i,
+              .dx_register_index = 0,
+              .dx_register_space = 0,
+              .count = 1,
+              .visibility = reshade::api::shader_stage::compute,
+              .array_size = 1,
+              .type = reshade::api::descriptor_type::texture_shader_resource_view
+          };
+        }
+
+        table0[3] = {
+            .binding = 3,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::sampler
+        };
+
+        // Table 1
+        reshade::api::descriptor_range table1[2]{};
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            table1[i] = {
+                .binding = i,
+                .dx_register_index = 0,
+                .dx_register_space = 0,
+                .count = 1,
+                .visibility = reshade::api::shader_stage::compute,
+                .array_size = 1,
+                .type = reshade::api::descriptor_type::constant_buffer
+            };
+        }
+
+        // Table 2
+        reshade::api::descriptor_range table2[2]{};
+        table2[0] = {
+            .binding = 0,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::texture_unordered_access_view
+        };
+
+        table2[1] = {
+            .binding = 1,
+            .dx_register_index = 0,
+            .dx_register_space = 0,
+            .count = 1,
+            .visibility = reshade::api::shader_stage::compute,
+            .array_size = 1,
+            .type = reshade::api::descriptor_type::texture_shader_resource_view
+        };
+
+        params[0] = reshade::api::pipeline_layout_param(4, table0);
+        params[1] = reshade::api::pipeline_layout_param(2, table1);
+        params[2] = reshade::api::pipeline_layout_param(2, table2);
+
+        bool ok = PipelineHelpers::create_compute_pipeline(
+            device, shader, params, 3, pipeline);
+
+        reshade::log::message(reshade::log::level::info, "Logging working ao created layout");
+        renodx::utils::trace::internal::LogLayout(3, params, pipeline.layout);
+
+        assert(ok);
+
+        device->allocate_descriptor_table(
+            pipeline.layout, 2, &pipeline.descriptor_table);
+    }
+
+    void create_resources(
+        reshade::api::device* device,
+        const reshade::api::resource_view& depth_srv,
+        uint32_t width,
+        uint32_t height)
+    {
+        reshade::api::resource_desc desc(
+            reshade::api::resource_type::texture_2d,
+            width,
+            height,
+            1,
+            1,
+            reshade::api::format::r8_unorm,
+            1,
+            reshade::api::memory_heap::gpu_only,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::copy_source |
+            reshade::api::resource_usage::copy_dest |
+            reshade::api::resource_usage::shader_resource |
+            reshade::api::resource_usage::render_target,
+            reshade::api::resource_flags::none);
+
+        device->create_resource(desc, nullptr, desc.usage, &working_ao.texture);
+
+        // UAV
+        working_ao.uavs.resize(1);
+
+        for (uint32_t i = 0; i < 1; ++i)
+        {
+            reshade::api::resource_view_desc view{};
+            view.type = reshade::api::resource_view_type::texture_2d;
+            view.format = reshade::api::format::r8_unorm;
+            view.texture.first_level = 0;
+            view.texture.level_count = 1;
+
+            device->create_resource_view(
+                working_ao.texture,
+                reshade::api::resource_usage::unordered_access,
+                view,
+                &working_ao.uavs[i]);
+        }
+
+        // SRV
+        working_ao.srvs.resize(1);
+
+        for (uint32_t i = 0; i < 1; ++i)
+        {
+            reshade::api::resource_view_desc view{};
+            view.type = reshade::api::resource_view_type::texture_2d;
+            view.format = reshade::api::format::r8_unorm;
+            view.texture.first_level = 0;
+            view.texture.level_count = 1;
+
+            device->create_resource_view(
+                working_ao.texture,
+                reshade::api::resource_usage::shader_resource,
+                view,
+                &working_ao.srvs[i]);
+        }
+
+        // Descriptor updates
+        reshade::api::descriptor_table_update updates[2]{};
+
+        // UAV
+        updates[0].table = pipeline.descriptor_table;
+        updates[0].binding = 0;
+        updates[0].array_offset = 0;
+        updates[0].count = 1;
+        updates[0].type = reshade::api::descriptor_type::texture_unordered_access_view;
+        updates[0].descriptors = &working_ao.uavs[0];
+
+        // Depth SRV
+        updates[1].table = pipeline.descriptor_table;
+        updates[1].binding = 1;
+        updates[1].array_offset = 0;
+        updates[1].count = 1;
+        updates[1].type = reshade::api::descriptor_type::texture_shader_resource_view;
+        updates[1].descriptors = &depth_srv;
+
+        device->update_descriptor_tables(2, updates);
+    }
+
+    void destroy(reshade::api::device* device)
+    {
+        working_ao.destroy(device);
         pipeline.destroy(device);
     }
 };
@@ -296,10 +488,12 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
     std::vector<reshade::api::descriptor_table> current_descriptor_tables;
   
     XeGTAODepthFilter depthFilter;
+    XeGTAOMainPass mainPass;
 
     void setup(reshade::api::device* device)
     {
         depthFilter.setup(device);
+        mainPass.setup(device);
     }
 
     void create_resources(
@@ -308,11 +502,13 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
         uint32_t height)
     {
         depthFilter.create_resources(device, width, height);
+        mainPass.create_resources(device, depthFilter.working_depth.srvs[0], width, height);
     }
 
     void destroy(reshade::api::device* device)
     {
         depthFilter.destroy(device);
+        mainPass.destroy(device);
     }
 };
 #endif
@@ -395,11 +591,13 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
     // ---------------------------------------------------------
     // Resource validation / recreation
     // ---------------------------------------------------------
-    auto& depthMip = data->depthFilter.texture_views;
+    auto& depthMip = data->depthFilter.working_depth;
+    auto& mainAO = data->mainPass.working_ao;
 
     if (resource_need_recreate)
     {
         depthMip.destroy(device);
+        mainAO.destroy(device);
         data->create_resources(device, screen_width, screen_height);
         resource_need_recreate = false;
     }
@@ -445,10 +643,74 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
         reshade::api::resource_usage::unordered_access);
 
     cmd_list->dispatch(
-        (screen_width + 7) / 8,
-        (screen_height + 7) / 8,
+        (screen_width + 16 - 1) / 16,
+        (screen_height + 16 - 1) / 16,
         1);
 
+    return false;
+}
+
+bool OnGTAOMainDispatch(reshade::api::command_list* cmd_list)
+{
+    auto* device = cmd_list->get_device();
+    auto* data = renodx::utils::data::Get<DeviceData>(device);
+
+    if (data == nullptr)
+        return true;
+
+    // ---------------------------------------------------------
+    // Resource validation / recreation
+    // ---------------------------------------------------------
+    auto& depthMip = data->depthFilter.working_depth;
+    auto& workingAO = data->mainPass.working_ao;
+
+    // ---------------------------------------------------------
+    // Compute dispatch
+    // ---------------------------------------------------------
+    cmd_list->bind_pipeline(
+        reshade::api::pipeline_stage::all_compute,
+        data->mainPass.pipeline.pipeline);
+
+    reshade::api::descriptor_table descriptor_tables[3] = {
+        data->current_descriptor_tables[0],
+        data->current_descriptor_tables[1],
+        data->mainPass.pipeline.descriptor_table
+    };
+
+    cmd_list->bind_descriptor_tables(
+        reshade::api::shader_stage::all_compute,
+        data->mainPass.pipeline.layout,
+        0,
+        3,
+        descriptor_tables);
+
+    cmd_list->barrier(
+        depthMip.texture,
+        reshade::api::resource_usage::unordered_access |
+        reshade::api::resource_usage::shader_resource,
+        reshade::api::resource_usage::shader_resource);
+
+    cmd_list->barrier(
+        workingAO.texture,
+        reshade::api::resource_usage::shader_resource,
+        reshade::api::resource_usage::unordered_access |
+        reshade::api::resource_usage::shader_resource);
+
+    cmd_list->dispatch(
+        (screen_width + 8 - 1) / 8,
+        (screen_height + 8 - 1) / 8,
+        1);
+
+    return false;
+}
+
+bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list)
+{
+    auto* device = cmd_list->get_device();
+    auto* data = renodx::utils::data::Get<DeviceData>(device);
+
+    if (data == nullptr)
+        return true;
     // ---------------------------------------------------------
     // Post-effects
     // ---------------------------------------------------------
@@ -460,10 +722,7 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
 
     const std::shared_lock lock(swap_data->mutex);
 
-    cmd_list->barrier(
-        depthMip.texture,
-        reshade::api::resource_usage::unordered_access,
-        reshade::api::resource_usage::shader_resource);
+    auto& depthMip = data->depthFilter.working_depth;
 
     for (auto* runtime : swap_data->effect_runtimes)
     {
@@ -473,11 +732,6 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
             depthMip.srvs[0],
             depthMip.srvs[0]);
     }
-
-    cmd_list->barrier(
-        depthMip.texture,
-        reshade::api::resource_usage::shader_resource,
-        reshade::api::resource_usage::unordered_access);
 
     return false;
 }
@@ -504,6 +758,18 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 			 .crc32 = 0x71C92F19,
 			 .code = __0x71C92F19,
 			 .on_draw = &OnGTAODepthFilterDispatch,
+		 },
+	},
+	{0x65236CFD, {
+			 .crc32 = 0x65236CFD,
+			 .code = __0x65236CFD,
+			 .on_draw = &OnGTAOMainDispatch,
+		 },
+	},
+	{0x21E2F7BD, {
+			 .crc32 = 0x21E2F7BD,
+			 .code = __0x21E2F7BD,
+			 .on_draw = &OnGTAOUpscaleDispatch,
 		 },
 	},
 #endif
@@ -761,13 +1027,6 @@ void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
     screen_width = bb.texture.width;
     screen_height = bb.texture.height;
     shader_injection.ui_aspect_ratio = static_cast<float>(bb.texture.height) / static_cast<float>(bb.texture.width);
-    for (auto& target : data->swap_chain_upgrade_targets) {
-        target.dimensions = {
-            static_cast<int16_t>(bb.texture.width / 2),
-            static_cast<int16_t>(bb.texture.height / 2),
-            renodx::utils::resource::ResourceUpgradeInfo::ANY
-			};
-    }
 	return;
 }
 
@@ -873,24 +1132,28 @@ void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::c
 
             reshade::api::resource_view empty_view = {0u};
             runtime->update_texture_bindings("DEPTH", empty_view, empty_view);
+            runtime->update_texture_bindings("WORKING_AO", empty_view, empty_view);
             reshade::log::message(reshade::log::level::info, "uav handle is 0, binding empty view");
         }
         runtime->set_effects_state(false);
         return;
     }
 
-    auto& depthMip = data->depthFilter.texture_views;
+    auto& depthMip = data->depthFilter.working_depth;
+    auto& workingAO = data->mainPass.working_ao;
 
     for (auto* runtime : renodx_device_data->effect_runtimes) {
         if (runtime == nullptr) continue;
 
         if (depthMip.srvs[0].handle != 0) {
             runtime->update_texture_bindings("DEPTH", depthMip.srvs[0], depthMip.srvs[0]);
+            runtime->update_texture_bindings("WORKING_AO", workingAO.srvs[0], workingAO.srvs[0]);
         }
         else
         {
           reshade::api::resource_view empty_view = {0u};
           runtime->update_texture_bindings("DEPTH", empty_view, empty_view);
+          runtime->update_texture_bindings("WORKING_AO", empty_view, empty_view);
           reshade::log::message(reshade::log::level::info, "uav handle is 0, binding empty view");
         }
     }
@@ -945,23 +1208,6 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 	  renodx::utils::descriptor::trace_descriptor_tables = false;  // RIP FPS
 
       renodx::mods::shader::minimum_constant_buffer_stages = reshade::api::shader_stage::pixel | reshade::api::shader_stage::compute;
-
-	  
-      renodx::mods::swapchain::swap_chain_upgrade_targets.push_back({
-          .old_format = reshade::api::format::r8_typeless,
-          .new_format = reshade::api::format::r16g16_typeless,
-          .ignore_size = false,
-          .use_resource_view_cloning = renodx::mods::swapchain::use_resource_cloning,
-          .aspect_ratio = renodx::utils::resource::ResourceUpgradeInfo::BACK_BUFFER,
-          .aspect_ratio_tolerance = common_aspect_ratio_tolerance,
-          .view_upgrades = {
-			   {{reshade::api::resource_usage::shader_resource, reshade::api::format::r8_unorm}, reshade::api::format::r16g16_float},
-			   {{reshade::api::resource_usage::unordered_access, reshade::api::format::r8_unorm}, reshade::api::format::r16g16_float},
-			   {{reshade::api::resource_usage::render_target, reshade::api::format::r8_unorm}, reshade::api::format::r16g16_float},
-			   {{reshade::api::resource_usage::copy_dest, reshade::api::format::r8_unorm}, reshade::api::format::r16g16_float},
-			   {{reshade::api::resource_usage::copy_source, reshade::api::format::r8_unorm}, reshade::api::format::r16g16_float},
-		  },
-      });
 	  
 	  reshade::register_event<reshade::addon_event::init_swapchain>(OnInitSwapchain);
 	  reshade::register_event<reshade::addon_event::present>(OnPresent);
