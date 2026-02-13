@@ -218,7 +218,8 @@ layout(set = 0, binding = 2) uniform texture2D _GTAODepthMIPs;
 layout(set = 0, binding = 0, r8) uniform writeonly image2D _GTAOOutAOTerm;
 
 layout(set = 2, binding = 0, r8) uniform writeonly image2D _GTAOOutAOTermFull;
-layout(set = 2, binding = 1) uniform texture2D _GTAODepthMIPsFull;
+layout(set = 2, binding = 1, rgb10_a2) uniform writeonly image2D _GTAOOutNormalFull;
+layout(set = 2, binding = 2) uniform texture2D _GTAODepthMIPsFull;
 
 // Inputs are screen XY and viewspace depth, output is viewspace position
 vec3 XeGTAO_ComputeViewspacePosition( const vec2 screenPos, const float viewspaceDepth )
@@ -300,6 +301,11 @@ vec4 XeGTAO_CalculateEdges( const float centerZ, const float leftZ, const float 
     return vec4(clamp( ( 1.25 - edgesLRTB / (centerZ * 0.011) ), 0.0, 1.0 ));
 }
 
+bool IsSky( float depth )
+{
+	return (depth == ShaderVariablesGlobal._ProjectionParams.z);
+}
+
 void main()
 {
     uint _103;
@@ -346,6 +352,7 @@ void main()
     // viewspace Z at the center
     float viewspaceZ  = textureLod(sampler2D(_GTAODepthMIPsFull, s_point_clamp_sampler), _142, 0.0).x;//textureGather(sampler2D(_GTAODepthMIPs, s_point_clamp_sampler), _137 * ShaderVariablesGlobal._ScreenSize.zw).y; 
 	
+#ifdef XE_GTAO_GENERATE_NORMALS_INPLACE
 	vec4 valuesUL = textureGather(
 		sampler2D(_GTAODepthMIPsFull, s_point_clamp_sampler),
 		vec2(gl_GlobalInvocationID.xy) * ShaderVariablesGlobal._ScreenSize.zw,
@@ -358,7 +365,7 @@ void main()
 		ivec2(1, 1),
 		0
 	);
-#ifdef XE_GTAO_GENERATE_NORMALS_INPLACE
+
     // viewspace Z at the center
     float viewspaceZ_Normal  = valuesUL.y; //sourceViewspaceDepth.SampleLevel( depthSampler, normalizedScreenPos, 0 ).x; 
 
@@ -404,6 +411,14 @@ void main()
     {
         _173 = _161;
     }
+	
+	imageStore(_GTAOOutNormalFull, ivec2(gl_GlobalInvocationID.xy), vec4(normalize(_173) * 0.5 + 0.5, 0.0));
+	if (IsSky(viewspaceZ))
+	{
+		imageStore(_GTAOOutAOTermFull, ivec2(gl_GlobalInvocationID.xy), vec4(1.0));
+		return;
+	}
+	
     vec3 _184 = normalize(_173) * mat3(ShaderVariablesGlobal._ViewMatrix[0].xyz, ShaderVariablesGlobal._ViewMatrix[1].xyz, ShaderVariablesGlobal._ViewMatrix[2].xyz);
     _184.z = -_184.z;
 	
@@ -527,6 +542,8 @@ void main()
 				
                 vec3 sampleDelta0 = (samplePos0 - pixCenterPos);
                 vec3 sampleDelta1 = (samplePos1 - pixCenterPos);
+				
+				SPIRV_CROSS_BRANCH
 				if (AO_USE_BITMASK)
 				{
 					float falloffBase0 = length( vec3(sampleDelta0.x, sampleDelta0.y, sampleDelta0.z) );

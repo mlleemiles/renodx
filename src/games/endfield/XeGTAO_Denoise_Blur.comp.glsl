@@ -188,10 +188,16 @@ layout(set = 1, binding = 1, std140) uniform type_GTAOData
     vec4 _GTAOHalfScreenSize;
 } _GTAOData;
 
-layout(set = 0, binding = 0, rg8) uniform writeonly image2D _GTAOBlurAOTermOutRT;
-layout(set = 0, binding = 1, r32f) uniform writeonly image2D _GTAOPreviousDepthRT;
-layout(set = 0, binding = 2) uniform texture2D _GTAOBlurAOTermInRT;
-layout(set = 0, binding = 3) uniform texture2D _GTAODepthMIPs;
+layout(set = 0, binding = 2) uniform sampler s_linear_clamp_sampler;
+layout(set = 0, binding = 1) uniform texture2D _GTAOBlurAOTermRT;
+layout(set = 0, binding = 0, r8) uniform writeonly image2D _GTAOUpsampleAOTermRT;
+
+layout(set = 2, binding = 0, rg8) uniform writeonly image2D _GTAOBlurAOTermOutRT;
+layout(set = 2, binding = 1, r32f) uniform writeonly image2D _GTAOPreviousDepthRT;
+layout(set = 2, binding = 2, rgb10_a2) uniform writeonly image2D _GTAOPreviousNormalRT;
+layout(set = 2, binding = 3) uniform texture2D _GTAOBlurAOTermInRT;
+layout(set = 2, binding = 4) uniform texture2D _GTAODepthMIPs;
+layout(set = 2, binding = 5) uniform texture2D _GTAOOutNormalFull;
 
 // 18 = 8 core + 5 border on each side
 const uint TILE_SIZE   = 18u;
@@ -205,6 +211,11 @@ float Weight(float centerDepth, float sampleDepth, float radius)
 {
     float v = -abs(sampleDepth - centerDepth) * shader_injection.ao_denoiser_blur_beta - radius;
     return exp(v);
+}
+
+bool IsSky( float depth )
+{
+	return (depth == ShaderVariablesGlobal._ProjectionParams.z);
 }
 
 
@@ -221,6 +232,16 @@ void main()
 	
     float age = texelFetch(_GTAOBlurAOTermInRT, ivec2(pixel), 0).g;
 	float ao = texelFetch(_GTAOBlurAOTermInRT, ivec2(pixel), 0).r;
+	vec3 normal = texelFetch(_GTAOOutNormalFull, ivec2(pixel), 0).xyz;
+	
+	imageStore(_GTAOPreviousNormalRT, ivec2(pixel), vec4(normal, 0.0));
+	
+	if (IsSky(depth))
+	{
+        imageStore(_GTAOBlurAOTermOutRT, ivec2(pixel), vec4(ao, age, 0.0, 0.0));
+		imageStore(_GTAOUpsampleAOTermRT, ivec2(pixel), vec4(ao));
+		return;
+	}
 
     float radius = age * 1389.9 + 1.0;
     radius = 120.0 / radius;
@@ -322,5 +343,6 @@ void main()
 
         float finalAO = sum / wsum;
         imageStore(_GTAOBlurAOTermOutRT, ivec2(pixel), vec4(ao, age, 0.0, 0.0));
+		imageStore(_GTAOUpsampleAOTermRT, ivec2(pixel), vec4(ao));
     }
 }

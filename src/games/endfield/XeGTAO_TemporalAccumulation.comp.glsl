@@ -202,8 +202,10 @@ layout(set = 0, binding = 0) uniform writeonly image2D _GTAOCurrentAOTermRT;
 layout(set = 2, binding = 0, rg8) uniform writeonly image2D _GTAOCurrentAOTermFullRT;
 layout(set = 2, binding = 1) uniform texture2D _GTAOMainAOTermFullRT;
 layout(set = 2, binding = 2) uniform texture2D _GTAODepthMIPsFull;
-layout(set = 2, binding = 3) uniform texture2D _GTAOPreviousAOTermFullRT;
-layout(set = 2, binding = 4) uniform texture2D _GTAOPreviousDepthRT;
+layout(set = 2, binding = 3) uniform texture2D _GTAOOutNormalFull;
+layout(set = 2, binding = 4) uniform texture2D _GTAOPreviousAOTermFullRT;
+layout(set = 2, binding = 5) uniform texture2D _GTAOPreviousDepthRT;
+layout(set = 2, binding = 6) uniform texture2D _GTAOPreviousNormalRT;
 
 #define SCREEN_SIZE ShaderVariablesGlobal._ScreenSize.xy
 #define SCREEN_SIZE_RCP ShaderVariablesGlobal._ScreenSize.zw
@@ -229,11 +231,39 @@ vec2 GetPrevUV(vec2 uv, float depth)
     return prevClip.xy * 0.5 + 0.5;
 }
 
+// Because of point sampler we must do our own sampling, will fix later
+vec4 SampleBilinear(texture2D tex, sampler s, vec2 uv) {
+    vec2 res = SCREEN_SIZE;
+    vec2 st = uv * res - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+
+    vec4 a = textureLod(sampler2D(tex, s), (iuv + vec2(0.5, 0.5)) / res, 0.0).xyzw;
+    vec4 b = textureLod(sampler2D(tex, s), (iuv + vec2(1.5, 0.5)) / res, 0.0).xyzw;
+    vec4 c = textureLod(sampler2D(tex, s), (iuv + vec2(0.5, 1.5)) / res, 0.0).xyzw;
+    vec4 d = textureLod(sampler2D(tex, s), (iuv + vec2(1.5, 1.5)) / res, 0.0).xyzw;
+
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+}
+
+bool IsSky( float depth )
+{
+	return (depth == ShaderVariablesGlobal._ProjectionParams.z);
+}
+
+
 void main()
 {
     vec2 uv = (vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) * SCREEN_SIZE_RCP;
 	
 	float currentDepth = textureLod(sampler2D(_GTAODepthMIPsFull, s_point_clamp_sampler), uv, 0.0).x;
+	
+	if (IsSky( currentDepth ))
+	{
+		imageStore(_GTAOCurrentAOTermFullRT, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 0.0, 0.0, 0.0));
+		imageStore(_GTAOCurrentAOTermRT, ivec2(gl_GlobalInvocationID.xy), vec4(0.0));
+		return;
+	}
 
     vec2 encodedMV = textureLod(sampler2D(_GTAOMotionVectorRT, s_point_clamp_sampler), uv, 0.0).xy;
     vec2 mvTmp = (abs(encodedMV) * 2.0) - vec2(1.0);
@@ -286,10 +316,56 @@ void main()
 	{
 		if ((!isDisocclusion) && (!isUVInvalid) && (_GTAOData._GTAOParam2.y != 0.0))
 		{
-			prevAge = textureLod(sampler2D(_GTAOPreviousAOTermFullRT, s_point_clamp_sampler), prevUV, 0.0).y;
-			prevAO = textureLod(sampler2D(_GTAOPreviousAOTermFullRT, s_point_clamp_sampler), prevUV, 0.0).x;
+			vec4 prevSample = SampleBilinear(_GTAOPreviousAOTermFullRT, s_point_clamp_sampler, prevUV);
+			prevAO = prevSample.x;
+			prevAge = prevSample.y;
 			
-			prevAge = clamp(prevAge + 1.0/17.0, 0.0, 1.0);
+			vec2 prevLocation = vec2(gl_GlobalInvocationID.xy) - velocity.xy * SCREEN_SIZE;
+			ivec2 iCoords = ivec2(floor(prevLocation));
+			
+			const ivec2 sampleOffsets[4] = { ivec2(0, 0), ivec2(1, 0), ivec2(0, 1), ivec2(1, 1) };
+			
+			vec3 sampleNormal[4];
+			sampleNormal[0] = normalize( texelFetch(_GTAOPreviousNormalRT, ivec2(prevLocation + vec2(sampleOffsets[0])), 0).xyz * 2.0 - 1.0 );
+			sampleNormal[1] = normalize( texelFetch(_GTAOPreviousNormalRT, ivec2(prevLocation + vec2(sampleOffsets[1])), 0).xyz * 2.0 - 1.0 );
+			sampleNormal[2] = normalize( texelFetch(_GTAOPreviousNormalRT, ivec2(prevLocation + vec2(sampleOffsets[2])), 0).xyz * 2.0 - 1.0 );
+			sampleNormal[3] = normalize( texelFetch(_GTAOPreviousNormalRT, ivec2(prevLocation + vec2(sampleOffsets[3])), 0).xyz * 2.0 - 1.0 );
+			
+			vec3 normalWorld = normalize( texelFetch(_GTAOOutNormalFull, ivec2(gl_GlobalInvocationID.xy), 0).xyz * 2.0 - 1.0 );
+			vec4 sampleWeights;
+			for (uint i = 0; i < 4; ++i)
+			{
+				sampleWeights[i] = dot( normalWorld, sampleNormal[i] ) > 0.01 ? 1.0 : 0.0;
+			}
+			
+			vec2 lerpFactors = fract( prevLocation );
+			sampleWeights[0] *= (1.0 - lerpFactors.x) * (1.0 - lerpFactors.y);
+			sampleWeights[1] *= lerpFactors.x * (1.0 - lerpFactors.y);
+			sampleWeights[2] *= (1.0 - lerpFactors.x) * lerpFactors.y;
+			sampleWeights[3] *= lerpFactors.x * lerpFactors.y;
+			sampleWeights = max(sampleWeights, 0.001);
+			
+			float velocityWeight = exp((-length(velocity * SCREEN_SIZE)) * _GTAOData._GTAOParam2.z);
+			float depthWeight =  exp(abs(min(currentDepth, 100.0) - min(prevDepth, 100.0)) * (-10.0));
+			
+			vec2 prevAOAges[4];
+			prevAOAges[0] = texelFetch(_GTAOPreviousAOTermFullRT, iCoords + sampleOffsets[0], 0).xy;
+			prevAOAges[1] = texelFetch(_GTAOPreviousAOTermFullRT, iCoords + sampleOffsets[1], 0).xy;
+			prevAOAges[2] = texelFetch(_GTAOPreviousAOTermFullRT, iCoords + sampleOffsets[2], 0).xy;
+			prevAOAges[3] = texelFetch(_GTAOPreviousAOTermFullRT, iCoords + sampleOffsets[3], 0).xy;
+			
+			prevAOAges[0] *= sampleWeights[0];
+			prevAOAges[1] *= sampleWeights[1];
+			prevAOAges[2] *= sampleWeights[2];
+			prevAOAges[3] *= sampleWeights[3];
+			
+			float accumulatedWeight = sampleWeights[0] + sampleWeights[1] + sampleWeights[2] + sampleWeights[3];
+
+			float rAccumulatedWeight = 1.0 / max( accumulatedWeight, 1e-6 );
+			prevAge = (prevAOAges[0].y + prevAOAges[1].y + prevAOAges[2].y + prevAOAges[3].y) * rAccumulatedWeight;
+			prevAO = (prevAOAges[0].x + prevAOAges[1].x + prevAOAges[2].x + prevAOAges[3].x) * rAccumulatedWeight;
+			
+			prevAge = clamp(prevAge + (velocityWeight*depthWeight)/7.0, 0.0, 1.0);
 			
 			float AOMidThresh = (AOUpperThresh + AOLowerThresh) * 0.5;
 			float AODiff = prevAO - AOMidThresh;
@@ -303,7 +379,7 @@ void main()
 		}
 	}
 	
-	float blendFactor = 1.0f / (prevAge * 17.0f + 1.0f);
+	float blendFactor = 1.0f / (prevAge * 7.0f + 1.0f);
 	float aoDelta = currentAO - prevAO;
 	float accumulatedAO = (blendFactor * aoDelta) + prevAO;
 	imageStore(_GTAOCurrentAOTermFullRT, ivec2(gl_GlobalInvocationID.xy), vec4(accumulatedAO, prevAge, 0.0, 0.0));
