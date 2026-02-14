@@ -1359,12 +1359,12 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
         data->destroy_resources(device);
         data->create_resources(device, screen_width, screen_height);
         resource_need_recreate = false;
+
+        reshade::log::message(
+            reshade::log::level::info,
+            "Recreating resources");
     }
-    else if (depthMip.texture.handle == 0 ||
-             depthMip.uavs.empty() ||
-             depthMip.srvs.empty() ||
-             depthMip.uavs[0].handle == 0 ||
-             depthMip.srvs[0].handle == 0)
+    else if (depthMip.texture.handle == 0)
     {
         reshade::log::message(
             reshade::log::level::info,
@@ -1398,11 +1398,23 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
         3,
         descriptor_tables);
 
-    cmd_list->barrier(
-        depthMip.texture,
-        reshade::api::resource_usage::unordered_access |
-        reshade::api::resource_usage::shader_resource,
-        reshade::api::resource_usage::unordered_access);
+    // Batched barrier
+    {
+        reshade::api::resource resources[] = {
+            depthMip.texture
+        };
+
+        reshade::api::resource_usage old_states[] = {
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource
+        };
+
+        reshade::api::resource_usage new_states[] = {
+            reshade::api::resource_usage::unordered_access
+        };
+
+        cmd_list->barrier(1, resources, old_states, new_states);
+    }
 
     cmd_list->dispatch(
         (screen_width + 16 - 1) / 16,
@@ -1447,23 +1459,31 @@ bool OnGTAOMainDispatch(reshade::api::command_list* cmd_list)
         3,
         descriptor_tables);
 
-    cmd_list->barrier(
-        depthMip.texture,
-        reshade::api::resource_usage::unordered_access |
-        reshade::api::resource_usage::shader_resource,
-        reshade::api::resource_usage::shader_resource);
+    // Batched barriers
+    {
+        reshade::api::resource resources[] = {
+            depthMip.texture,
+            workingAO.texture,
+            workingNormal.texture
+        };
 
-    cmd_list->barrier(
-        workingAO.texture,
-        reshade::api::resource_usage::shader_resource,
-        reshade::api::resource_usage::unordered_access |
-        reshade::api::resource_usage::shader_resource);
+        reshade::api::resource_usage old_states[] = {
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource
+        };
 
-    cmd_list->barrier(
-        workingNormal.texture,
-        reshade::api::resource_usage::shader_resource,
-        reshade::api::resource_usage::unordered_access |
-        reshade::api::resource_usage::shader_resource);
+        reshade::api::resource_usage new_states[] = {
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource
+        };
+
+        cmd_list->barrier(3, resources, old_states, new_states);
+    }
 
     cmd_list->dispatch(
         (screen_width + 8 - 1) / 8,
@@ -1513,42 +1533,43 @@ bool OnGTAOTemporalDispatch(reshade::api::command_list* cmd_list)
             3,
             descriptor_tables);
 
-        cmd_list->barrier(
+    // Batched barriers
+    {
+        reshade::api::resource resources[] = {
             workingAO.texture,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             prevAO.texture,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             prevDepth.texture,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             workingNormal.texture,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             prevNormal.texture,
+            temporalAO.texture
+        };
+
+        reshade::api::resource_usage old_states[] = {
             reshade::api::resource_usage::unordered_access |
             reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
-            temporalAO.texture,
+            reshade::api::resource_usage::unordered_access |
             reshade::api::resource_usage::shader_resource,
             reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource);
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource
+        };
 
+        reshade::api::resource_usage new_states[] = {
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource
+        };
+
+        cmd_list->barrier(6, resources, old_states, new_states);
+    }
 
         cmd_list->dispatch(
             (screen_width + 8 - 1) / 8,
@@ -1599,36 +1620,39 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list)
             3,
             descriptor_tables);
 
-        cmd_list->barrier(
+    // Batched barriers
+    {
+        reshade::api::resource resources[] = {
             prevAO.texture,
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             prevDepth.texture,
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             prevNormal.texture,
-            reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::unordered_access |
-            reshade::api::resource_usage::shader_resource);
-
-        cmd_list->barrier(
             temporalAO.texture,
+            workingNormal.texture
+        };
+
+        reshade::api::resource_usage old_states[] = {
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
             reshade::api::resource_usage::unordered_access |
             reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource
+        };
 
-        cmd_list->barrier(
-            workingNormal.texture,
+        reshade::api::resource_usage new_states[] = {
             reshade::api::resource_usage::unordered_access |
             reshade::api::resource_usage::shader_resource,
-            reshade::api::resource_usage::shader_resource);
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::unordered_access |
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource,
+            reshade::api::resource_usage::shader_resource
+        };
 
+        cmd_list->barrier(5, resources, old_states, new_states);
+    }
         cmd_list->dispatch(
             (screen_width + 8 - 1) / 8,
             (screen_height + 8 - 1) / 8,
@@ -1679,37 +1703,37 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 #ifdef RESHADE_AO
 	{0x71C92F19, {
 			 .crc32 = 0x71C92F19,
-			 .code = __0x71C92F19,
+			 //.code = __0x71C92F19,
 			 .on_draw = &OnGTAODepthFilterDispatch,
 		 },
 	},
 	{0x65236CFD, {
 			 .crc32 = 0x65236CFD,
-			 .code = __0x65236CFD,
+			 //.code = __0x65236CFD,
 			 .on_draw = &OnGTAOMainDispatch,
 		 },
 	},
 	{0xF1E4A910, {
 			 .crc32 = 0xF1E4A910,
-			 .code = __0xF1E4A910,
+			 //.code = __0xF1E4A910,
 			 .on_draw = &OnGTAOTemporalDispatch,
 		 },
 	},
   {0x820102A4, {
 			 .crc32 = 0x820102A4,
-			 .code = __0x820102A4,
+			 //.code = __0x820102A4,
 			 .on_draw = [](auto* cmd_list) { return false; },
 		 },
 	},
   {0x3F1D52C5, {
 			 .crc32 = 0x3F1D52C5,
-			 .code = __0x3F1D52C5,
+			 //.code = __0x3F1D52C5,
 			 .on_draw = [](auto* cmd_list) { return false; },
 		 },
 	},
 	{0x21E2F7BD, {
 			 .crc32 = 0x21E2F7BD,
-			 .code = __0x21E2F7BD,
+			 //.code = __0x21E2F7BD,
 			 .on_draw = &OnGTAOUpscaleDispatch,
 		 },
 	},
@@ -1940,8 +1964,8 @@ renodx::utils::settings::Settings settings = {
 
 void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
 	auto* device = swapchain->get_device();
-	auto* data = renodx::utils::data::Get<renodx::mods::swapchain::DeviceData>(device);
-	if (!data) return;
+	//auto* data = renodx::utils::data::Get<renodx::mods::swapchain::DeviceData>(device);
+	//if (!data) return;
 
 	auto bb = device->get_resource_desc(swapchain->get_current_back_buffer());
 	if (bb.type == reshade::api::resource_type::unknown) return;
@@ -1988,7 +2012,9 @@ void OnPresent(
   drawParams = {0, 0, 0, 0, 0};
 #endif
 #ifdef RESHADE_AO
-  hasDepth = false;
+  if (hasDepth) {
+      hasDepth = false;
+  }
 #endif
 	
 }
@@ -2195,7 +2221,7 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
   renodx::utils::shader::Use(fdw_reason);
   renodx::utils::descriptor::Use(fdw_reason);
 #endif
-  renodx::mods::swapchain::Use(fdw_reason);
+  //renodx::mods::swapchain::Use(fdw_reason);
   renodx::mods::shader::Use(fdw_reason, custom_shaders, &shader_injection);
 
   return TRUE;
