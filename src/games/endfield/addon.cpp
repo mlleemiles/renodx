@@ -1282,6 +1282,7 @@ int16_t screen_height = 0;
 uint32_t render_width = 0;
 uint32_t render_height = 0;
 bool render_res_confirmed = false;
+bool gtao_has_drawn = false;
 bool resource_need_recreate = false;
 
 #ifdef REMOVE_UI
@@ -1718,6 +1719,8 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list)
             (render_height + 8 - 1) / 8,
             1);
     }
+	
+	gtao_has_drawn = true;
 #ifdef RESHADE_AO_DEBUG
     // ---------------------------------------------------------
     // Post-effects
@@ -2085,6 +2088,9 @@ void OnPresent(
   if (render_res_confirmed) {
       render_res_confirmed = false;
   }
+  if (gtao_has_drawn) {
+	  gtao_has_drawn = false;
+  }
 #endif
 	
 }
@@ -2124,19 +2130,22 @@ void OnBindDescriptorTables(
     uint32_t first,
     uint32_t count,
     const reshade::api::descriptor_table* tables) {
+		
+	if (!gtao_has_drawn)
+	{
+		auto* device = cmd_list->get_device();
+		auto* data = renodx::utils::data::Get<DeviceData>(device);
+		if (data == nullptr) return;
 
-    auto* device = cmd_list->get_device();
-    auto* data = renodx::utils::data::Get<DeviceData>(device);
-    if (data == nullptr) return;
-
-    // Resize if needed
-    if (data->current_descriptor_tables.size() < first + count) {
-        data->current_descriptor_tables.resize(first + count);
-    }
-    // Copy the descriptor tables
-    for (uint32_t i = 0; i < count; ++i) {
-        data->current_descriptor_tables[first + i] = tables[i];
-    }
+		// Resize if needed
+		if (data->current_descriptor_tables.size() < first + count) {
+			data->current_descriptor_tables.resize(first + count);
+		}
+		// Copy the descriptor tables
+		for (uint32_t i = 0; i < count; ++i) {
+			data->current_descriptor_tables[first + i] = tables[i];
+		}
+	}
 }
 
 #ifdef RESHADE_AO_DEBUG
