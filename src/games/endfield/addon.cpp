@@ -1289,6 +1289,7 @@ bool resource_need_recreate = false;
 #ifdef REMOVE_UI
 bool isPingInputCandidate = false;
 bool isUIDInputCandidate = false;
+bool swapchain_drawing = false;
 
 struct DrawIndexedInstancedParams {
     uint32_t index_count;
@@ -2016,6 +2017,14 @@ renodx::utils::settings::Settings settings = {
     },
 #endif
     new renodx::utils::settings::Setting{
+        .key = "FPSLimit",
+        .binding = &renodx::utils::swapchain::fps_limit,
+        .default_value = 0.f,
+        .label = "FPS Limit",
+        .min = 0.f,
+        .max = 480.f,
+    },
+    new renodx::utils::settings::Setting{
         .value_type = renodx::utils::settings::SettingValueType::TEXT,
         .label = "Mod by miru.",
         .section = "About",
@@ -2058,12 +2067,23 @@ bool OnDrawIndexed(
     uint32_t first_index,
     int32_t vertex_offset,
     uint32_t first_instance) {
-
-    drawParams.index_count = index_count;
-    drawParams.instance_count = instance_count;
-    drawParams.first_index = first_index;
-    drawParams.vertex_offset = vertex_offset;
-    drawParams.first_instance = first_instance;
+		
+	if (!swapchain_drawing)
+	{
+		if (renodx::utils::swapchain::HasBackBufferRenderTarget(cmd_list))
+		{
+			swapchain_drawing = true;
+		}
+	}
+	
+	if (swapchain_drawing)
+	{
+		drawParams.index_count = index_count;
+		drawParams.instance_count = instance_count;
+		drawParams.first_index = first_index;
+		drawParams.vertex_offset = vertex_offset;
+		drawParams.first_instance = first_instance;
+	}
 
     return false;
 }
@@ -2079,7 +2099,8 @@ void OnPresent(
 #ifdef REMOVE_UI
 	isPingInputCandidate = false;
 	isUIDInputCandidate = false;
-  drawParams = {0, 0, 0, 0, 0};
+	drawParams = {0, 0, 0, 0, 0};
+	swapchain_drawing = false;
 #endif
 #ifdef RESHADE_AO
 #ifdef RESHADE_AO_DEBUG
