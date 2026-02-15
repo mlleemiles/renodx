@@ -246,6 +246,68 @@ vec4 SampleBilinear(texture2D tex, sampler s, vec2 uv) {
     return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
 }
 
+vec4 CatmullRomWeights(float t)
+{
+    float t2 = t * t;
+    float t3 = t2 * t;
+
+    return vec4(
+        -0.5*t3 +      t2 - 0.5*t,
+         1.5*t3 - 2.5*t2 + 1.0,
+        -1.5*t3 + 2.0*t2 + 0.5*t,
+         0.5*t3 - 0.5*t2
+    );
+}
+
+vec4 SampleCatmullRom(texture2D tex, sampler s, vec2 uv)
+{
+    vec2 res = SCREEN_SIZE;
+    vec2 st = uv * res - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+
+    vec4 wx = CatmullRomWeights(fuv.x);
+    vec4 wy = CatmullRomWeights(fuv.y);
+
+    vec2 base = (iuv + vec2(0.5)) / res;
+
+    vec4 c00 = textureLod(sampler2D(tex, s), base + vec2(-1.0, -1.0) / res, 0.0);
+    vec4 c10 = textureLod(sampler2D(tex, s), base + vec2( 0.0, -1.0) / res, 0.0);
+    vec4 c20 = textureLod(sampler2D(tex, s), base + vec2( 1.0, -1.0) / res, 0.0);
+    vec4 c30 = textureLod(sampler2D(tex, s), base + vec2( 2.0, -1.0) / res, 0.0);
+
+    vec4 c01 = textureLod(sampler2D(tex, s), base + vec2(-1.0,  0.0) / res, 0.0);
+    vec4 c11 = textureLod(sampler2D(tex, s), base + vec2( 0.0,  0.0) / res, 0.0);
+    vec4 c21 = textureLod(sampler2D(tex, s), base + vec2( 1.0,  0.0) / res, 0.0);
+    vec4 c31 = textureLod(sampler2D(tex, s), base + vec2( 2.0,  0.0) / res, 0.0);
+
+    vec4 c02 = textureLod(sampler2D(tex, s), base + vec2(-1.0,  1.0) / res, 0.0);
+    vec4 c12 = textureLod(sampler2D(tex, s), base + vec2( 0.0,  1.0) / res, 0.0);
+    vec4 c22 = textureLod(sampler2D(tex, s), base + vec2( 1.0,  1.0) / res, 0.0);
+    vec4 c32 = textureLod(sampler2D(tex, s), base + vec2( 2.0,  1.0) / res, 0.0);
+
+    vec4 c03 = textureLod(sampler2D(tex, s), base + vec2(-1.0,  2.0) / res, 0.0);
+    vec4 c13 = textureLod(sampler2D(tex, s), base + vec2( 0.0,  2.0) / res, 0.0);
+    vec4 c23 = textureLod(sampler2D(tex, s), base + vec2( 1.0,  2.0) / res, 0.0);
+    vec4 c33 = textureLod(sampler2D(tex, s), base + vec2( 2.0,  2.0) / res, 0.0);
+
+    vec4 col0 = c00*wx.x + c10*wx.y + c20*wx.z + c30*wx.w;
+    vec4 col1 = c01*wx.x + c11*wx.y + c21*wx.z + c31*wx.w;
+    vec4 col2 = c02*wx.x + c12*wx.y + c22*wx.z + c32*wx.w;
+    vec4 col3 = c03*wx.x + c13*wx.y + c23*wx.z + c33*wx.w;
+
+    return col0*wy.x + col1*wy.y + col2*wy.z + col3*wy.w;
+}
+
+float ClipHistory(float history, float current, float mean, float stdDev) {
+    float gamma = 1.0; // Stricter = 0.5, Looser = 1.5. 1.0 is a good balance.
+    float minB = mean - gamma * stdDev;
+    float maxB = mean + gamma * stdDev;
+
+    // Clamp history to the variance box
+    return clamp(history, minB, maxB);
+}
+
 bool IsSky( float depth )
 {
 	return (depth == ShaderVariablesGlobal._ProjectionParams.z);
@@ -282,6 +344,9 @@ void main()
     float m2 = 0.0;
     float currentAO = 0.0;
 	float sampleAO[9];
+	
+	float minAO = 9999.0;
+	float maxAO = -9999.0;
 
     SPIRV_CROSS_UNROLL
     for (int i = 0; i < 9; i++)
@@ -290,6 +355,9 @@ void main()
         
         m1 += sampleAO[i];
         m2 += sampleAO[i] * sampleAO[i];
+		
+        minAO = min(minAO, sampleAO[i]); // Take min and max
+        maxAO = max(maxAO, sampleAO[i]);
 
         // Store center pixel (index 4 in your array is 0,0)
         if (i == 4) currentAO = sampleAO[i];
@@ -297,8 +365,8 @@ void main()
 
     m1 /= 9.0; // Mean
     m2 /= 9.0; 
-    float sigma = sqrt(max(m2 - m1 * m1, 0.0)) * 1.25f; // Standard Deviation
-	
+    float sigma = sqrt(max(m2 - m1 * m1, 0.0));// * 1.25f; // Standard Deviation
+	/*
     float minCrossAO = min(sampleAO[1], min(min(sampleAO[3], sampleAO[4]), min(sampleAO[5], sampleAO[7])));
     float minCornerAO = min(min(sampleAO[0], sampleAO[2]), min(sampleAO[6], sampleAO[8]));
     float AOLowerThresh = min((minCrossAO + minCornerAO) * 0.5, m1 - sigma);
@@ -306,7 +374,7 @@ void main()
     float maxCrossAO = max(sampleAO[1], max(max(sampleAO[3], sampleAO[4]), max(sampleAO[5], sampleAO[7])));
     float maxCornerAO = max(max(sampleAO[0], sampleAO[2]), max(sampleAO[6], sampleAO[8]));
     float AOUpperThresh = max((maxCrossAO + maxCornerAO) * 0.5, m1 + sigma);
-	
+	*/
 	if (isZeroTime)
 	{
 		prevAge = 0.0;
@@ -316,10 +384,12 @@ void main()
 	{
 		if ((!isDisocclusion) && (!isUVInvalid) && (_GTAOData._GTAOParam2.y != 0.0))
 		{
-			vec4 prevSample = SampleBilinear(_GTAOPreviousAOTermFullRT, s_point_clamp_sampler, prevUV);
+			vec4 prevSample = SampleCatmullRom(_GTAOPreviousAOTermFullRT, s_point_clamp_sampler, prevUV);
 			prevAO = prevSample.x;
 			prevAge = prevSample.y;
 			
+			// Too many texture fetches
+			/*
 			vec2 prevLocation = vec2(gl_GlobalInvocationID.xy) - velocity.xy * SCREEN_SIZE;
 			ivec2 iCoords = ivec2(floor(prevLocation));
 			
@@ -345,9 +415,6 @@ void main()
 			sampleWeights[3] *= lerpFactors.x * lerpFactors.y;
 			sampleWeights = max(sampleWeights, 0.001);
 			
-			float velocityWeight = exp((-length(abs(velocity) * SCREEN_SIZE)) * _GTAOData._GTAOParam2.z);
-			float depthWeight =  exp(abs(min(currentDepth, 100.0) - min(prevDepth, 100.0)) * (-10.0));
-			
 			vec2 prevAOAges[4];
 			prevAOAges[0] = texelFetch(_GTAOPreviousAOTermFullRT, iCoords + sampleOffsets[0], 0).xy;
 			prevAOAges[1] = texelFetch(_GTAOPreviousAOTermFullRT, iCoords + sampleOffsets[1], 0).xy;
@@ -364,14 +431,21 @@ void main()
 			float rAccumulatedWeight = 1.0 / max( accumulatedWeight, 1e-6 );
 			prevAge = (prevAOAges[0].y + prevAOAges[1].y + prevAOAges[2].y + prevAOAges[3].y) * rAccumulatedWeight;
 			prevAO = (prevAOAges[0].x + prevAOAges[1].x + prevAOAges[2].x + prevAOAges[3].x) * rAccumulatedWeight;
+			*/
 			
 			//Decrease previous age for fast pixels and depth diff
+			float velocityWeight = exp((-length(velocity * SCREEN_SIZE)) * _GTAOData._GTAOParam2.z);
+			float depthWeight =  exp(abs(min(currentDepth, 100.0) - min(prevDepth, 100.0)) * (-10.0));
 			prevAge = clamp(prevAge*clamp(velocityWeight*depthWeight, 0.0, 1.0) + 1.0/7.0, 0.0, 1.0);
 			
+			/*
 			float AOMidThresh = (AOUpperThresh + AOLowerThresh) * 0.5;
 			float AODiff = prevAO - AOMidThresh;
 			float AODiffNorm = abs(AODiff / ((AOUpperThresh - AOLowerThresh) * 0.5));
 			prevAO = mix(prevAO, AOMidThresh + (AODiff / AODiffNorm), bool(AODiffNorm > 1.0));
+			*/
+			//prevAO = ClipHistory(prevAO, currentAO, m1, sigma);
+			prevAO = clamp(prevAO, minAO, maxAO);
 		}
 		else
 		{
