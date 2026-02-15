@@ -1283,6 +1283,7 @@ uint32_t render_width = 0;
 uint32_t render_height = 0;
 bool render_res_confirmed = false;
 bool gtao_has_drawn = false;
+bool gtao_will_draw = false;
 bool resource_need_recreate = false;
 
 #ifdef REMOVE_UI
@@ -1392,6 +1393,7 @@ bool OnNormalDepthBlit(reshade::api::command_list* cmd_list)
 #endif
 
             render_res_confirmed = true;
+			gtao_will_draw = true;
         }
     }
     return true;
@@ -2091,6 +2093,9 @@ void OnPresent(
   if (gtao_has_drawn) {
 	  gtao_has_drawn = false;
   }
+  if (gtao_will_draw) {
+	  gtao_will_draw = false;
+  }
 #endif
 	
 }
@@ -2131,7 +2136,7 @@ void OnBindDescriptorTables(
     uint32_t count,
     const reshade::api::descriptor_table* tables) {
 		
-	if (!gtao_has_drawn)
+	if (!gtao_has_drawn && gtao_will_draw)
 	{
 		auto* device = cmd_list->get_device();
 		auto* data = renodx::utils::data::Get<DeviceData>(device);
