@@ -1279,6 +1279,9 @@ struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
 
 int16_t screen_width = 0;
 int16_t screen_height = 0;
+uint32_t render_width = 0;
+uint32_t render_height = 0;
+bool render_res_confirmed = false;
 bool resource_need_recreate = false;
 
 #ifdef REMOVE_UI
@@ -1300,7 +1303,9 @@ float use_uid = 1.0f;
 #endif
 
 #ifdef RESHADE_AO
+#ifdef RESHADE_AO_DEBUG
 bool hasDepth = false;
+#endif
 #endif
 
 std::vector<std::string> generateNumberLabels(int start, int end, int step = 1) {
@@ -1337,6 +1342,60 @@ bool OnUIDDraw(reshade::api::command_list* cmd_list) {
 #endif
 
 #ifdef RESHADE_AO
+bool OnNormalDepthBlit(reshade::api::command_list* cmd_list)
+{
+    if (!render_res_confirmed) {
+#ifdef RESHADE_AO_DEBUG
+        reshade::log::message(
+            reshade::log::level::info,
+            "Checking normal depth blit pass");
+#endif
+
+        auto* cmd_list_data = renodx::utils::data::Get<renodx::utils::swapchain::CommandListData>(cmd_list);
+        if (cmd_list_data == nullptr) return true;
+        if (cmd_list_data->current_render_targets.empty()) return true;
+
+        auto rtv0 = cmd_list_data->current_render_targets[0];
+        if (rtv0.handle == 0) return true;
+
+        auto* device = cmd_list->get_device();
+
+        auto current_rtv = device->get_resource_desc(device->get_resource_from_view(rtv0));
+        
+#ifdef RESHADE_AO_DEBUG
+        std::stringstream s;
+        s << "Width = " << current_rtv.texture.width;
+        s << ", Height = " << current_rtv.texture.height;
+        s << ", Format = " << current_rtv.texture.format;
+        reshade::log::message(reshade::log::level::info, s.str().c_str());
+#endif
+	
+        if (current_rtv.texture.format == reshade::api::format::r10g10b10a2_typeless) {
+
+#ifdef RESHADE_AO_DEBUG
+            reshade::log::message(
+                reshade::log::level::info,
+                "Got normal depth blit RTV");
+#endif
+
+            if (current_rtv.texture.width != render_width || current_rtv.texture.height != render_height) {
+                resource_need_recreate = true;
+            }
+            render_width = current_rtv.texture.width;
+            render_height = current_rtv.texture.height;
+
+#ifdef RESHADE_AO_DEBUG
+            reshade::log::message(
+                reshade::log::level::debug,
+                std::format("Render - width:{} height:{}", static_cast<float>(render_width), static_cast<float>(render_height)).c_str());
+#endif
+
+            render_res_confirmed = true;
+        }
+    }
+    return true;
+}
+
 bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
 {
     auto* device = cmd_list->get_device();
@@ -1357,7 +1416,7 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
     if (resource_need_recreate)
     {
         data->destroy_resources(device);
-        data->create_resources(device, screen_width, screen_height);
+        data->create_resources(device, render_width, render_height);
         resource_need_recreate = false;
 
         reshade::log::message(
@@ -1370,10 +1429,11 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
             reshade::log::level::info,
             "Resources handles are 0, creating resources");
 
-        data->create_resources(device, screen_width, screen_height);
+        data->create_resources(device, render_width, render_height);
     }
-
+#ifdef RESHADE_AO_DEBUG
     hasDepth = true;
+#endif
 
     // ---------------------------------------------------------
     // Compute dispatch
@@ -1417,8 +1477,8 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list)
     }
 
     cmd_list->dispatch(
-        (screen_width + 16 - 1) / 16,
-        (screen_height + 16 - 1) / 16,
+        (render_width + 16 - 1) / 16,
+        (render_height + 16 - 1) / 16,
         1);
 
     return false;
@@ -1486,8 +1546,8 @@ bool OnGTAOMainDispatch(reshade::api::command_list* cmd_list)
     }
 
     cmd_list->dispatch(
-        (screen_width + 8 - 1) / 8,
-        (screen_height + 8 - 1) / 8,
+        (render_width + 8 - 1) / 8,
+        (render_height + 8 - 1) / 8,
         1);
 
     return false;
@@ -1572,8 +1632,8 @@ bool OnGTAOTemporalDispatch(reshade::api::command_list* cmd_list)
     }
 
         cmd_list->dispatch(
-            (screen_width + 8 - 1) / 8,
-            (screen_height + 8 - 1) / 8,
+            (render_width + 8 - 1) / 8,
+            (render_height + 8 - 1) / 8,
             1);
       }
 
@@ -1654,8 +1714,8 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list)
         cmd_list->barrier(5, resources, old_states, new_states);
     }
         cmd_list->dispatch(
-            (screen_width + 8 - 1) / 8,
-            (screen_height + 8 - 1) / 8,
+            (render_width + 8 - 1) / 8,
+            (render_height + 8 - 1) / 8,
             1);
     }
 #ifdef RESHADE_AO_DEBUG
@@ -1701,6 +1761,11 @@ renodx::mods::shader::CustomShaders custom_shaders = {
 	},
 #endif
 #ifdef RESHADE_AO
+	{0xC14B0925, {
+			 .crc32 = 0xC14B0925,
+			 .on_draw = &OnNormalDepthBlit,
+		 },
+	},
 	{0x71C92F19, {
 			 .crc32 = 0x71C92F19,
 			 //.code = __0x71C92F19,
@@ -2012,8 +2077,13 @@ void OnPresent(
   drawParams = {0, 0, 0, 0, 0};
 #endif
 #ifdef RESHADE_AO
+#ifdef RESHADE_AO_DEBUG
   if (hasDepth) {
       hasDepth = false;
+  }
+#endif
+  if (render_res_confirmed) {
+      render_res_confirmed = false;
   }
 #endif
 	
@@ -2022,23 +2092,29 @@ void OnPresent(
 
 #ifdef RESHADE_AO
 void OnInitDevice(reshade::api::device* device) {
-	renodx::utils::data::Create<DeviceData>(device);
-  auto* data = renodx::utils::data::Get<DeviceData>(device);
-  if (data) {
-      data->current_descriptor_tables.clear();
-      data->game_cbuffer_descriptor_table = {0};
-      data->setup(device);
-  }
+    if (device->get_api() == reshade::api::device_api::vulkan)
+    {
+        renodx::utils::data::Create<DeviceData>(device);
+        auto* data = renodx::utils::data::Get<DeviceData>(device);
+        if (data) {
+            data->current_descriptor_tables.clear();
+            data->game_cbuffer_descriptor_table = {0};
+            data->setup(device);
+        }
+    }
 }
 
 void OnDestroyDevice(reshade::api::device* device) {
-  auto* data = renodx::utils::data::Get<DeviceData>(device);
-  if (data) {
-      data->current_descriptor_tables.clear();
-      data->game_cbuffer_descriptor_table = {0};
-      data->destroy(device);
-  }
-  renodx::utils::data::Delete<DeviceData>(device);
+    if (device->get_api() == reshade::api::device_api::vulkan)
+    {
+        auto* data = renodx::utils::data::Get<DeviceData>(device);
+        if (data) {
+            data->current_descriptor_tables.clear();
+            data->game_cbuffer_descriptor_table = {0};
+            data->destroy(device);
+        }
+        renodx::utils::data::Delete<DeviceData>(device);
+    }
 }
 
 void OnBindDescriptorTables(
@@ -2063,6 +2139,7 @@ void OnBindDescriptorTables(
     }
 }
 
+#ifdef RESHADE_AO_DEBUG
 void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::command_list *cmd_list, reshade::api::resource_view rtv, reshade::api::resource_view rtv_srgb) {
     auto* device = cmd_list->get_device();
 	
@@ -2123,6 +2200,7 @@ void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::c
 
     hasDepth = false;
 }
+#endif
 #endif
 
 bool initialized = false;
@@ -2222,6 +2300,7 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
   renodx::utils::descriptor::Use(fdw_reason);
 #endif
   //renodx::mods::swapchain::Use(fdw_reason);
+  renodx::utils::swapchain::Use(fdw_reason);
   renodx::mods::shader::Use(fdw_reason, custom_shaders, &shader_injection);
 
   return TRUE;
