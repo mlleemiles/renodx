@@ -207,6 +207,19 @@ shared float gAO[TILE_SIZE * TILE_SIZE];
 shared float gFiltered[TILE_SIZE * TILE_SIZE];
 shared float gDepth[TILE_SIZE * TILE_SIZE];
 
+vec3 XeGTAO_ComputeViewspacePosition( const vec2 screenPos, const float viewspaceDepth )
+{
+    vec2 _198 = (vec4((screenPos * 2.0) - vec2(1.0), 1.0, 1.0) * ShaderVariablesGlobal._InvProjMatrix).xy * viewspaceDepth;
+    vec3 _202 = vec3(_198.x, -_198.y, viewspaceDepth);
+    return _202;
+}
+
+vec3 GetPositionWorld(vec2 screenPos, float viewspaceDepth)
+{
+	vec3 viewPos = XeGTAO_ComputeViewspacePosition(screenPos, viewspaceDepth);
+	return (ShaderVariablesGlobal._InvViewMatrix * vec4(viewPos, 1.0)).xyz;
+}
+
 float Weight(float centerDepth, float sampleDepth, float radius)
 {
     float v = -abs(sampleDepth - centerDepth) * shader_injection.ao_denoiser_blur_beta - radius;
@@ -218,6 +231,8 @@ bool IsSky( float depth )
 	return (depth == ShaderVariablesGlobal._ProjectionParams.z);
 }
 
+#define DEPTH_THRESHOLD				0.0005
+#define NORMAL_THRESHOLD			0.5
 
 void main()
 {	
@@ -232,9 +247,13 @@ void main()
 	
     float age = texelFetch(_GTAOBlurAOTermInRT, ivec2(pixel), 0).g;
 	float ao = texelFetch(_GTAOBlurAOTermInRT, ivec2(pixel), 0).r;
-	vec3 normal = texelFetch(_GTAOOutNormalFull, ivec2(pixel), 0).xyz;
+	vec3 normalWorld = texelFetch(_GTAOOutNormalFull, ivec2(pixel), 0).xyz;
 	
-	imageStore(_GTAOPreviousNormalRT, ivec2(pixel), vec4(normal, 0.0));
+	imageStore(_GTAOBlurAOTermOutRT, ivec2(pixel), vec4(ao, age, 0.0, 0.0));
+	imageStore(_GTAOPreviousNormalRT, ivec2(pixel), vec4(normalWorld, 0.0));
+	
+	/*
+	normalWorld = normalize(normalWorld * 2.0 - 1.0);
 	
 	if (IsSky(depth))
 	{
@@ -242,6 +261,7 @@ void main()
 		imageStore(_GTAOUpsampleAOTermRT, ivec2(pixel), vec4(ao));
 		return;
 	}
+	*/
 
     float radius = age * 1389.9 + 1.0;
     radius = 120.0 / radius;
@@ -342,7 +362,59 @@ void main()
         }
 
         float finalAO = sum / wsum;
-        imageStore(_GTAOBlurAOTermOutRT, ivec2(pixel), vec4(ao, age, 0.0, 0.0));
-		imageStore(_GTAOUpsampleAOTermRT, ivec2(pixel), vec4(ao));
+		imageStore(_GTAOUpsampleAOTermRT, ivec2(pixel), vec4(finalAO));
     }
+	
+	
+/*
+	vec2 pixelCenter = vec2(pixel) + vec2(0.5, 0.5);
+	vec2 normalizedScreenPos = pixelCenter * ShaderVariablesGlobal._ScreenSize.zw;
+	vec3 positionWS = GetPositionWorld( normalizedScreenPos, depth );
+	
+	
+	float accumulatedAmbientOcclusion = 0;
+	float accumulatedWeight = 1e-4;
+	float ageWeight = exp(-shader_injection.ao_denoiser_blur_beta * age);
+	
+	accumulatedWeight = 1.0;
+	accumulatedAmbientOcclusion = ao;
+	
+	SPIRV_CROSS_UNROLL
+	for (uint i = 0; i < 9; ++i)
+	{
+		ivec2 sampleOffset;
+		sampleOffset.x = int( i % 3 ) - 1;
+		sampleOffset.y = int( i / 3 ) - 1;
+		
+		sampleOffset.xy = ivec2(vec2(sampleOffset) * (ao + 1.0));
+		
+		ivec2 iSamplePosition = ivec2(pixel.xy) + sampleOffset;
+		float sampleLinearDepth = texelFetch(_GTAODepthMIPs, ivec2(iSamplePosition), 0).r;
+		
+		if (IsSky(sampleLinearDepth)) continue;
+		
+		vec3 sampleNormalWorld = normalize( texelFetch(_GTAOOutNormalFull, ivec2(iSamplePosition), 0).xyz * 2.0 - 1.0 );
+		float sampleOcclusion = texelFetch(_GTAOBlurAOTermInRT, ivec2(iSamplePosition), 0).r;
+		
+		pixelCenter = vec2(iSamplePosition) + vec2(0.5, 0.5);
+		normalizedScreenPos = pixelCenter * ShaderVariablesGlobal._ScreenSize.zw;
+		vec3 samplePositionWS = GetPositionWorld( normalizedScreenPos, sampleLinearDepth );
+		
+		float planeDistance = dot( samplePositionWS - positionWS, normalWorld );
+		
+		float planeWeight = clamp( 1.0 - abs( planeDistance ) / (max(depth, 0.1) * DEPTH_THRESHOLD), 0.0, 1.0 );
+		
+		float normalWeight = smoothstep( NORMAL_THRESHOLD, 1.0, clamp( dot( normalWorld, sampleNormalWorld ), 0.0, 1.0 ) );
+		
+		float weight = normalWeight * planeWeight * ageWeight;
+		
+		accumulatedAmbientOcclusion += sampleOcclusion * weight;
+		accumulatedWeight += weight;
+	}
+	
+	accumulatedAmbientOcclusion /= accumulatedWeight;
+	
+	imageStore(_GTAOUpsampleAOTermRT, ivec2(pixel), vec4(accumulatedAmbientOcclusion));
+*/
+
 }

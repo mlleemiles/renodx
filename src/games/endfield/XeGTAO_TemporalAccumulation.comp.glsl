@@ -345,7 +345,7 @@ void main()
 			sampleWeights[3] *= lerpFactors.x * lerpFactors.y;
 			sampleWeights = max(sampleWeights, 0.001);
 			
-			float velocityWeight = exp((-length(velocity * SCREEN_SIZE)) * _GTAOData._GTAOParam2.z);
+			float velocityWeight = exp((-length(abs(velocity) * SCREEN_SIZE)) * _GTAOData._GTAOParam2.z);
 			float depthWeight =  exp(abs(min(currentDepth, 100.0) - min(prevDepth, 100.0)) * (-10.0));
 			
 			vec2 prevAOAges[4];
@@ -365,7 +365,8 @@ void main()
 			prevAge = (prevAOAges[0].y + prevAOAges[1].y + prevAOAges[2].y + prevAOAges[3].y) * rAccumulatedWeight;
 			prevAO = (prevAOAges[0].x + prevAOAges[1].x + prevAOAges[2].x + prevAOAges[3].x) * rAccumulatedWeight;
 			
-			prevAge = clamp(prevAge + (velocityWeight*depthWeight)/7.0, 0.0, 1.0);
+			//Decrease previous age for fast pixels and depth diff
+			prevAge = clamp(prevAge*clamp(velocityWeight*depthWeight, 0.0, 1.0) + 1.0/7.0, 0.0, 1.0);
 			
 			float AOMidThresh = (AOUpperThresh + AOLowerThresh) * 0.5;
 			float AODiff = prevAO - AOMidThresh;
