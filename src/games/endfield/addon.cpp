@@ -26,7 +26,7 @@
 #include "./shared.h"
 
 namespace {
-  
+
 #ifdef RESHADE_AO
 struct ComputePipeline
 {
@@ -1219,7 +1219,7 @@ struct XeGTAODenoise
 struct __declspec(uuid("595827c4-19b2-4300-af4d-c6802d6c7636")) DeviceData {
     std::vector<reshade::api::descriptor_table> current_descriptor_tables;
     reshade::api::descriptor_table game_cbuffer_descriptor_table;
-  
+
     XeGTAODepthFilter depthFilter;
     XeGTAOMainPass mainPass;
     XeGTAOTemporalAccumulation temporalPass;
@@ -1326,13 +1326,13 @@ bool OnPingDraw(reshade::api::command_list* cmd_list) {
 		constexpr uint32_t PING_INDEX_COUNT = 18;
 		constexpr uint32_t PING_FIRST_INDEX = 0;
 		constexpr int32_t PING_VERTEX_OFFSET = 0;
-    isPingInputCandidate = (drawParams.index_count == PING_INDEX_COUNT) && 
-							   (drawParams.first_index == PING_FIRST_INDEX) && 
+    isPingInputCandidate = (drawParams.index_count == PING_INDEX_COUNT) &&
+							   (drawParams.first_index == PING_FIRST_INDEX) &&
 							   (drawParams.vertex_offset == PING_VERTEX_OFFSET);
 
     shader_injection.ui_disable_flag = isPingInputCandidate && (use_ping == 0.0f) ? 1.0f : 0.0f;
     return true;
-	
+
 }
 
 bool OnUIDDraw(reshade::api::command_list* cmd_list) {
@@ -1364,7 +1364,7 @@ bool OnNormalDepthBlit(reshade::api::command_list* cmd_list)
         auto* device = cmd_list->get_device();
 
         auto current_rtv = device->get_resource_desc(device->get_resource_from_view(rtv0));
-        
+
 #ifdef RESHADE_AO_DEBUG
         std::stringstream s;
         s << "Width = " << current_rtv.texture.width;
@@ -1372,7 +1372,7 @@ bool OnNormalDepthBlit(reshade::api::command_list* cmd_list)
         s << ", Format = " << current_rtv.texture.format;
         reshade::log::message(reshade::log::level::info, s.str().c_str());
 #endif
-	
+
         if (current_rtv.texture.format == reshade::api::format::r10g10b10a2_typeless) {
 
 #ifdef RESHADE_AO_DEBUG
@@ -1722,7 +1722,7 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list)
             (render_height + 8 - 1) / 8,
             1);
     }
-	
+
 	gtao_has_drawn = true;
 #ifdef RESHADE_AO_DEBUG
     // ---------------------------------------------------------
@@ -1753,57 +1753,57 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list)
 renodx::mods::shader::CustomShaders custom_shaders = {
 
 #ifdef REMOVE_UI
-	{0xEA9EED6C, {
-			 .crc32 = 0xEA9EED6C,
-       .code = __0xEA9EED6C,
+	{0xCC3559D9, {
+			 .crc32 = 0xCC3559D9,
+       .code = __0xCC3559D9,
 			 .on_draw = &OnPingDraw,
        .on_drawn = [](auto* cmd_list) { shader_injection.ui_disable_flag = 0.0f; return true; },
 		 },
 	},
-  {0x92BB9EA9, {
-			 .crc32 = 0x92BB9EA9,
+  {0x9BC795C0, {
+			 .crc32 = 0x9BC795C0,
 			 .on_draw = &OnUIDDraw,
 		 },
 	},
 #endif
 #ifdef RESHADE_AO
-	{0xC14B0925, {
-			 .crc32 = 0xC14B0925,
+	{0x62E34627, {
+			 .crc32 = 0x62E34627,
 			 .on_draw = &OnNormalDepthBlit,
 		 },
 	},
-	{0x71C92F19, {
-			 .crc32 = 0x71C92F19,
+	{0x2600FFD9, {
+			 .crc32 = 0x2600FFD9,
 			 //.code = __0x71C92F19,
 			 .on_draw = &OnGTAODepthFilterDispatch,
 		 },
 	},
-	{0x65236CFD, {
-			 .crc32 = 0x65236CFD,
+	{0xC9F8FF1E, {
+			 .crc32 = 0xC9F8FF1E,
 			 //.code = __0x65236CFD,
 			 .on_draw = &OnGTAOMainDispatch,
 		 },
 	},
-	{0xF1E4A910, {
-			 .crc32 = 0xF1E4A910,
+	{0x1BBD088D, {
+			 .crc32 = 0x1BBD088D,
 			 //.code = __0xF1E4A910,
 			 .on_draw = &OnGTAOTemporalDispatch,
 		 },
 	},
-  {0x820102A4, {
-			 .crc32 = 0x820102A4,
+  {0xB1E75D27, {
+			 .crc32 = 0xB1E75D27,
 			 //.code = __0x820102A4,
 			 .on_draw = [](auto* cmd_list) { return false; },
 		 },
 	},
-  {0x3F1D52C5, {
-			 .crc32 = 0x3F1D52C5,
+  {0x45712666, {
+			 .crc32 = 0x45712666,
 			 //.code = __0x3F1D52C5,
 			 .on_draw = [](auto* cmd_list) { return false; },
 		 },
 	},
-	{0x21E2F7BD, {
-			 .crc32 = 0x21E2F7BD,
+	{0xF9147A51, {
+			 .crc32 = 0xF9147A51,
 			 //.code = __0x21E2F7BD,
 			 .on_draw = &OnGTAOUpscaleDispatch,
 		 },
@@ -2048,7 +2048,7 @@ void OnInitSwapchain(reshade::api::swapchain* swapchain, bool resize) {
 
 	auto bb = device->get_resource_desc(swapchain->get_current_back_buffer());
 	if (bb.type == reshade::api::resource_type::unknown) return;
-    
+
     if (bb.texture.width != screen_width || bb.texture.height != screen_height) {
         resource_need_recreate = true;
     }
@@ -2067,15 +2067,12 @@ bool OnDrawIndexed(
     uint32_t first_index,
     int32_t vertex_offset,
     uint32_t first_instance) {
-		
+
 	if (!swapchain_drawing)
 	{
-		if (renodx::utils::swapchain::HasBackBufferRenderTarget(cmd_list))
-		{
-			swapchain_drawing = true;
-		}
+		swapchain_drawing = renodx::utils::swapchain::HasBackBufferRenderTarget(cmd_list);
 	}
-	
+
 	if (swapchain_drawing)
 	{
 		drawParams.index_count = index_count;
@@ -2118,7 +2115,7 @@ void OnPresent(
 	  gtao_will_draw = false;
   }
 #endif
-	
+
 }
 
 
@@ -2156,7 +2153,7 @@ void OnBindDescriptorTables(
     uint32_t first,
     uint32_t count,
     const reshade::api::descriptor_table* tables) {
-		
+
 	if (!gtao_has_drawn && gtao_will_draw)
 	{
 		auto* device = cmd_list->get_device();
@@ -2177,7 +2174,7 @@ void OnBindDescriptorTables(
 #ifdef RESHADE_AO_DEBUG
 void OnBeginRenderEffects(reshade::api::effect_runtime *runtime, reshade::api::command_list *cmd_list, reshade::api::resource_view rtv, reshade::api::resource_view rtv_srgb) {
     auto* device = cmd_list->get_device();
-	
+
     auto* renodx_device_data = renodx::utils::data::Get<renodx::utils::swapchain::DeviceData>(device);
     if (renodx_device_data == nullptr) return;
     const std::shared_lock lock(renodx_device_data->mutex);
@@ -2247,23 +2244,23 @@ extern "C" __declspec(dllexport) constexpr const char* DESCRIPTION = "AO Intensi
 
 BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
   auto use_resource_view_cloning = false;
-  
+
   auto common_aspect_ratio_tolerance = 0.00001f;
-  
+
   const auto view_upgrades = renodx::utils::resource::VIEW_UPGRADES_RGBA16F;
-  
+
   const renodx::utils::resource::ResourceUpgradeInfo::Dimensions min_dimensions = {
 	  .width = renodx::utils::resource::ResourceUpgradeInfo::ANY,
 	  .height = renodx::utils::resource::ResourceUpgradeInfo::ANY,
 	  .depth = renodx::utils::resource::ResourceUpgradeInfo::ANY,
   };
-  
+
   renodx::utils::resource::ResourceUpgradeInfo::Dimensions dimensions = {
 	  .width = renodx::utils::resource::ResourceUpgradeInfo::BACK_BUFFER,
 	  .height = renodx::utils::resource::ResourceUpgradeInfo::BACK_BUFFER,
 	  .depth = renodx::utils::resource::ResourceUpgradeInfo::BACK_BUFFER,
   };
-  
+
 
   switch (fdw_reason) {
     case DLL_PROCESS_ATTACH:
@@ -2280,17 +2277,17 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
       renodx::mods::swapchain::use_resource_cloning = false;
 
       renodx::mods::shader::expand_existing_constant_buffer = false;
-	  
+
 	  renodx::utils::descriptor::trace_descriptor_tables = false;  // RIP FPS
 
       renodx::mods::shader::minimum_constant_buffer_stages = reshade::api::shader_stage::pixel | reshade::api::shader_stage::compute;
-	  
+
 	  reshade::register_event<reshade::addon_event::init_swapchain>(OnInitSwapchain);
 	  reshade::register_event<reshade::addon_event::present>(OnPresent);
 #ifdef REMOVE_UI
 	  reshade::register_event<reshade::addon_event::draw_indexed>(OnDrawIndexed);
 #endif
-	  
+
 #ifdef RESHADE_AO
       reshade::register_event<reshade::addon_event::init_device>(OnInitDevice);
       reshade::register_event<reshade::addon_event::destroy_device>(OnDestroyDevice);
@@ -2321,8 +2318,8 @@ BOOL APIENTRY DllMain(HMODULE h_module, DWORD fdw_reason, LPVOID lpv_reserved) {
 #endif
 
 
-#endif      
-	
+#endif
+
       reshade::unregister_addon(h_module);
       break;
   }

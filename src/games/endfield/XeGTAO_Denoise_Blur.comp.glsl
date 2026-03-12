@@ -96,6 +96,8 @@ layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
     vec4 _ExponentialFogParams1;
     vec4 _ExponentialFogParams2;
     vec4 _ExponentialFogParams3;
+    vec4 _ExponentialFogParams4;
+    vec4 _ExponentialFogParams5;
     vec4 _VolumetricFogParams0;
     vec4 _VolumetricFogParams1;
     vec4 _VolumetricFogParams2;
@@ -119,6 +121,7 @@ layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
     vec4 _VFXParams0;
     vec4 _VFXParams1;
     vec4 _VFXParams2;
+    vec4 _VFXParams3;
     vec4 _CharacterParams0;
     vec4 _CharacterParams1;
     vec4 _CharacterParams2;
@@ -185,6 +188,7 @@ layout(set = 1, binding = 1, std140) uniform type_GTAOData
     vec4 _GTAOParam0;
     vec4 _GTAOParam1;
     vec4 _GTAOParam2;
+    vec4 _GTAOParam3;
     vec4 _GTAOHalfScreenSize;
 } _GTAOData;
 

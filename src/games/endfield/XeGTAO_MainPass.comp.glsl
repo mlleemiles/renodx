@@ -97,6 +97,8 @@ layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
     vec4 _ExponentialFogParams1;
     vec4 _ExponentialFogParams2;
     vec4 _ExponentialFogParams3;
+    vec4 _ExponentialFogParams4;
+    vec4 _ExponentialFogParams5;
     vec4 _VolumetricFogParams0;
     vec4 _VolumetricFogParams1;
     vec4 _VolumetricFogParams2;
@@ -120,6 +122,7 @@ layout(set = 1, binding = 0, std140) uniform type_ShaderVariablesGlobal
     vec4 _VFXParams0;
     vec4 _VFXParams1;
     vec4 _VFXParams2;
+    vec4 _VFXParams3;
     vec4 _CharacterParams0;
     vec4 _CharacterParams1;
     vec4 _CharacterParams2;
@@ -186,6 +189,7 @@ layout(set = 1, binding = 1, std140) uniform type_GTAOData
     vec4 _GTAOParam0; // radius, scale, thickness, distribution power [4.0000, 1.0000, 1.0000, 1.0000]
     vec4 _GTAOParam1; // thickness bias, ao gamma, frame index, mip bias [2.0000, 2.2000, 49.0000, 3.3000]
     vec4 _GTAOParam2;
+    vec4 _GTAOParam3;
     vec4 _GTAOHalfScreenSize;
 } _GTAOData;
 
@@ -196,7 +200,7 @@ layout(set = 1, binding = 1, std140) uniform type_GTAOData
 #define AO_THIN_OCCLUDER      ((shader_injection.ao_thin_occluder != 0.0f) ? shader_injection.ao_thin_occluder : _GTAOData._GTAOParam1.x)
 #define AO_GAMMA_GTAO         ((shader_injection.ao_gamma != 0.0f) ? shader_injection.ao_gamma : _GTAOData._GTAOParam1.y)
 #define AO_TEMPORAL_FRAME     64u
-#define AO_MIP_BIAS           ((shader_injection.ao_mip_bias != 0.0f) ? shader_injection.ao_mip_bias : _GTAOData._GTAOParam1.w)
+#define AO_MIP_BIAS           ((shader_injection.ao_mip_bias != 0.0f) ? shader_injection.ao_mip_bias : _GTAOData._GTAOParam3.x - 1.0)
 #define AO_DIRECTION_COUNT    ((shader_injection.ao_direction_count != 0.0f) ? shader_injection.ao_direction_count : 3.0f)
 #define AO_STEP_COUNT         ((shader_injection.ao_step_count != 0.0f) ? shader_injection.ao_step_count : 3.0f)
 #define AO_NORMAL_ATTENUATION ((shader_injection.ao_normal_attenuation != 0.0f) ? shader_injection.ao_normal_attenuation : 0.05f)
