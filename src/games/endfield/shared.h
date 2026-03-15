@@ -43,9 +43,9 @@ struct ShaderInjectData {
   float ao_denoiser_blur_beta;
   float ui_disable_flag;
   float ui_aspect_ratio;
-  
-  float ssr_mip_threshold;
-  float ssr_step_scale;
+
+  float render_resolution_x;
+  float render_resolution_y;
   float ssr_step_max;
   float dummy1;
 };
@@ -90,9 +90,9 @@ layout(push_constant) uniform PushData {
   float ao_denoiser_blur_beta;
   float ui_disable_flag;
   float ui_aspect_ratio;
-  
-  float ssr_mip_threshold;
-  float ssr_step_scale;
+
+  float render_resolution_x;
+  float render_resolution_y;
   float ssr_step_max;
   float dummy1;
 }
