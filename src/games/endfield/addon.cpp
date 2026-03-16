@@ -1474,6 +1474,172 @@ struct DepthOfField {
     }
   }
 
+  const reshade::api::resource_usage srv_usage =
+    reshade::api::resource_usage::unordered_access |
+    reshade::api::resource_usage::shader_resource
+;
+
+  const reshade::api::resource_usage uav_usage =
+    reshade::api::resource_usage::unordered_access
+;
+
+  void resource_barrier(reshade::api::command_list* cmd_list, DOFState state) {
+    switch (state) {
+      case DOF_COC_DOWN_CALC: {
+        constexpr uint32_t count = 3;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldDownCoCRWTexture.texture,
+          texDepthOfFieldDownSceneColorRWTexture.texture,
+          texDepthOfFieldDownPreviousSceneColorTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, uav_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, srv_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+      case DOF_COC_TILE_CALC: {
+        constexpr uint32_t count = 1;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldDownCoCRWTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { srv_usage };
+        const reshade::api::resource_usage old_states[] = { uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_ONE_COMP_VERT_0_CALC: {
+        constexpr uint32_t count = 4;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldOneComponentVerticalRWTexture0.texture,
+          texDepthOfFieldOneComponentVerticalRWTexture1.texture,
+          texDepthOfFieldOneComponentAlphaTexture.texture,
+          texDepthOfFieldDownSceneColorRWTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, uav_usage, uav_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, srv_usage, srv_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_ONE_COMP_HORI_0_CALC: {
+        constexpr uint32_t count = 5;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldOneComponentHorizontalRWTexture.texture,
+          texDepthOfFieldOneComponentAlphaRWTexture.texture,
+          texDepthOfFieldOneComponentVerticalRWTexture0.texture,
+          texDepthOfFieldOneComponentVerticalRWTexture1.texture,
+          texDepthOfFieldOneComponentAlphaTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, uav_usage, srv_usage, srv_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, srv_usage, uav_usage, uav_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_ONE_COMP_ALPHA_0_CALC: {
+        constexpr uint32_t count = 2;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldOneComponentAlphaTexture.texture,
+          texDepthOfFieldOneComponentAlphaRWTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_ONE_COMP_ALPHA_1_CALC: {
+        constexpr uint32_t count = 2;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldOneComponentAlphaRWTexture.texture,
+          texDepthOfFieldOneComponentAlphaTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_ONE_COMP_VERT_1_CALC: {
+        constexpr uint32_t count = 4;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldOneComponentVerticalRWTexture0.texture,
+          texDepthOfFieldOneComponentVerticalRWTexture1.texture,
+          texDepthOfFieldDownCoCRWTexture.texture,
+          texDepthOfFieldDownSceneColorRWTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, uav_usage, srv_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, srv_usage, uav_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_ONE_COMP_HORI_1_CALC: {
+        constexpr uint32_t count = 5;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldDownPreviousSceneColorTexture.texture,
+          texDepthOfFieldDownCoCRWTexture.texture,
+          texDepthOfFieldDownSceneColorRWTexture.texture,
+          texDepthOfFieldOneComponentVerticalRWTexture0.texture,
+          texDepthOfFieldOneComponentVerticalRWTexture1.texture
+        };
+        const reshade::api::resource_usage new_states[] = { uav_usage, srv_usage, srv_usage, srv_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { srv_usage, uav_usage, uav_usage, uav_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      case DOF_OUT_CALC: {
+        constexpr uint32_t count = 3;
+
+        const reshade::api::resource resources[] = {
+          texDepthOfFieldOneComponentHorizontalRWTexture.texture,
+          texDepthOfFieldDownPreviousSceneColorTexture.texture,
+          texDepthOfFieldOneComponentAlphaRWTexture.texture
+        };
+        const reshade::api::resource_usage new_states[] = { srv_usage, srv_usage, srv_usage };
+        const reshade::api::resource_usage old_states[] = { uav_usage, uav_usage, uav_usage };
+
+        cmd_list->barrier(count, resources, old_states, new_states);
+
+        return;
+      }
+
+      // These states don't require descriptor updates
+      case DOF_NOT_DRAWN:
+      case DOF_COC_CALC:
+      case DOF_END:
+      case DOF_COC_BLUR_TILE_CALC: break;
+
+      default: break;
+    }
+  }
+
   // we can just do partial updates to the current descriptor tables, no need to create them
   /*
   reshade::api::resource_view srvSceneColorTexture;
@@ -1757,16 +1923,16 @@ bool OnGTAODepthFilterDispatch(reshade::api::command_list* cmd_list) {
 
   // Batched barrier
   {
-    reshade::api::resource resources[] = {
+    const reshade::api::resource resources[] = {
         depthMip.texture
     };
 
-    reshade::api::resource_usage old_states[] = {
+    const reshade::api::resource_usage old_states[] = {
         reshade::api::resource_usage::unordered_access |
         reshade::api::resource_usage::shader_resource
     };
 
-    reshade::api::resource_usage new_states[] = {
+    const reshade::api::resource_usage new_states[] = {
         reshade::api::resource_usage::unordered_access
     };
 
@@ -1817,20 +1983,20 @@ bool OnGTAOMainDispatch(reshade::api::command_list* cmd_list) {
 
   // Batched barriers
   {
-    reshade::api::resource resources[] = {
+    const reshade::api::resource resources[] = {
         depthMip.texture,
         workingAO.texture,
         workingNormal.texture
     };
 
-    reshade::api::resource_usage old_states[] = {
+    const reshade::api::resource_usage old_states[] = {
         reshade::api::resource_usage::unordered_access |
         reshade::api::resource_usage::shader_resource,
         reshade::api::resource_usage::shader_resource,
         reshade::api::resource_usage::shader_resource
     };
 
-    reshade::api::resource_usage new_states[] = {
+    const reshade::api::resource_usage new_states[] = {
         reshade::api::resource_usage::shader_resource,
         reshade::api::resource_usage::unordered_access |
         reshade::api::resource_usage::shader_resource,
@@ -1890,7 +2056,7 @@ bool OnGTAOTemporalDispatch(reshade::api::command_list* cmd_list) {
 
     // Batched barriers
     {
-      reshade::api::resource resources[] = {
+      const reshade::api::resource resources[] = {
           workingAO.texture,
           prevAO.texture,
           prevDepth.texture,
@@ -1899,7 +2065,7 @@ bool OnGTAOTemporalDispatch(reshade::api::command_list* cmd_list) {
           temporalAO.texture
       };
 
-      reshade::api::resource_usage old_states[] = {
+      const reshade::api::resource_usage old_states[] = {
           reshade::api::resource_usage::unordered_access |
           reshade::api::resource_usage::shader_resource,
           reshade::api::resource_usage::unordered_access |
@@ -1913,7 +2079,7 @@ bool OnGTAOTemporalDispatch(reshade::api::command_list* cmd_list) {
           reshade::api::resource_usage::shader_resource
       };
 
-      reshade::api::resource_usage new_states[] = {
+      const reshade::api::resource_usage new_states[] = {
           reshade::api::resource_usage::shader_resource,
           reshade::api::resource_usage::shader_resource,
           reshade::api::resource_usage::shader_resource,
@@ -1976,7 +2142,7 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list) {
 
     // Batched barriers
     {
-      reshade::api::resource resources[] = {
+      const reshade::api::resource resources[] = {
           prevAO.texture,
           prevDepth.texture,
           prevNormal.texture,
@@ -1984,7 +2150,7 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list) {
           workingNormal.texture
       };
 
-      reshade::api::resource_usage old_states[] = {
+      const reshade::api::resource_usage old_states[] = {
           reshade::api::resource_usage::shader_resource,
           reshade::api::resource_usage::shader_resource,
           reshade::api::resource_usage::shader_resource,
@@ -1994,7 +2160,7 @@ bool OnGTAOUpscaleDispatch(reshade::api::command_list* cmd_list) {
           reshade::api::resource_usage::shader_resource
       };
 
-      reshade::api::resource_usage new_states[] = {
+      const reshade::api::resource_usage new_states[] = {
           reshade::api::resource_usage::unordered_access |
           reshade::api::resource_usage::shader_resource,
           reshade::api::resource_usage::unordered_access |
@@ -2103,6 +2269,8 @@ bool DispatchDoFComputePass(
       -1,
       pc_param.push_constants.visibility
       );
+
+  dof.resource_barrier(cmd_list, dof_state);
 
   cmd_list->dispatch(group_count_x, group_count_y, group_count_z);
 
